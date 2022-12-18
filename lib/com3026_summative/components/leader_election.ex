@@ -1,6 +1,6 @@
-defmodule IncreasingTimeout do
+defmodule EventualLeaderElection do
   def start(name, processes) do
-    pid = spawn(IncreasingTimeout, :init, [name, processes])
+    pid = spawn(EventualLeaderElection, :init, [name, processes])
 
     case :global.re_register_name(name, pid) do
       :yes -> pid
@@ -11,17 +11,15 @@ defmodule IncreasingTimeout do
     pid
   end
 
-  # Init event must be the first
-  # one after the component is created
   def init(name, processes) do
     state = %{
       name: name,
-      processes: Enum.filter(processes, fn p -> name != p end),
-      # timeout in millis
+      processes: processes,
       delta: 500,
       delay: 1000,
       alive: MapSet.new(processes),
-      suspected: %MapSet{}
+      suspected: %MapSet{},
+      leader: maxrank(processes)
     }
 
     Process.send_after(self(), {:timeout}, state.delta)
@@ -37,8 +35,11 @@ defmodule IncreasingTimeout do
             %{state | delta: state.delay + state.delta}
           end
 
-          IO.puts("#{state.name}: #{inspect({:timeout})}")
-          state = check_and_probe(state, state.processes)
+          IO.puts("current leader: #{state.leader}")
+          # IO.puts("#{state.name}: #{inspect({:timeout})}")
+          state =
+            check_and_probe(state, Enum.filter(state.processes, fn p -> state.name != p end))
+
           state = %{state | alive: %MapSet{}}
           Process.send_after(self(), {:timeout}, state.delay)
           state
@@ -50,8 +51,7 @@ defmodule IncreasingTimeout do
 
         {:heartbeat_reply, name} ->
           # Uncomment this line to simulate a delayed response by process :p1
-          # This results in all processes detecting :p1 as crashed.
-          if state.name == :p1, do: Process.sleep(10000)
+          # if state.name == :p1, do: Process.sleep(10000)
 
           IO.puts("#{state.name}: #{inspect({:heartbeat_reply, name})}")
           %{state | alive: MapSet.put(state.alive, name)}
@@ -77,13 +77,13 @@ defmodule IncreasingTimeout do
         p not in state.alive and p not in state.suspected ->
           state = %{state | suspected: MapSet.put(state.suspected, p)}
           send(self(), {:crash, p})
-          state
+          checkrank(state)
 
         # else if (p ∈ alive) ∧ (p ∈ suspected) then
         p in state.alive and p in state.suspected ->
           state = %{state | suspected: MapSet.delete(state.suspected, p)}
           send(self(), {:restore, p})
-          state
+          checkrank(state)
 
         true ->
           state
@@ -91,11 +91,24 @@ defmodule IncreasingTimeout do
 
     case :global.whereis_name(p) do
       pid when is_pid(pid) -> send(pid, {:heartbeat_request, self()})
-      # IO.puts("self: #{inspect(self())}\npid: #{inspect(pid)}\nare different: #{inspect(pid != self())}")
-      # IO.puts("pid: #{inspect(pid)}")
       :undefined -> :ok
     end
 
     check_and_probe(state, p_tail)
+  end
+
+  defp checkrank(state) do
+    cond do
+      state.leader != maxrank(state.alive) ->
+        %{state | leader: maxrank(MapSet.put(state.alive, state.name))}
+
+      true ->
+        state
+    end
+  end
+
+  # first process in ordered alive set = highest rank
+  defp maxrank(alive) do
+    alive |> Enum.sort() |> Enum.at(0)
   end
 end
