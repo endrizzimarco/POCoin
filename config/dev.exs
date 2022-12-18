@@ -26,8 +26,19 @@ config :com3026_summative, Com3026SummativeWeb.Endpoint,
   secret_key_base: "fVEWAXyeL3gnt4Q8tK0VeJJRHILsQ/j+buXzqBcfTwBvxXsiO9XIGmmnNDMdaRha",
   watchers: [
     # Start the esbuild watcher by calling Esbuild.install_and_run(:default, args)
-    esbuild: {Esbuild, :install_and_run, [:default, ~w(--sourcemap=inline --watch)]}
+    esbuild: {Esbuild, :install_and_run, [:default, ~w(--sourcemap=inline --watch)]},
+    node: [
+      "node_modules/webpack/bin/webpack.js",
+      "--mode",
+      "development",
+      "--watch",
+      "--config",
+      "node_modules/@vue/cli-service/webpack.config.js",
+      cd: Path.expand("../app", __DIR__)
+    ]
   ]
+
+
 
 # ## SSL Support
 #
