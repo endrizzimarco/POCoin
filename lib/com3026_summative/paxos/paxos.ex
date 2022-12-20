@@ -6,7 +6,6 @@ defmodule Paxos do
       :yes -> pid
     end
 
-    IO.puts("registered #{name}")
     pid
   end
 
@@ -62,6 +61,8 @@ defmodule Paxos do
       # ----- Proposer -----
       # ====================
       {:propose, client, leader_pid, inst, value} ->
+        IO.puts("#{inspect state.name}: received propose request for instance #{inspect inst} with value #{inspect value}")
+
         # brodcast prepare message to all acceptors
         if leader_pid == self(), do: beb_broadcast({:prepare, client, self(), inst}, state.processes)
         # store proposal for this round
