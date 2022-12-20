@@ -98,12 +98,10 @@ defmodule EventualLeaderElection do
   end
 
   defp checkrank(state) do
-    cond do
-      state.leader != maxrank(state.alive) ->
-        %{state | leader: maxrank(MapSet.put(state.alive, state.name))}
-
-      true ->
-        state
+    if state.leader != maxrank(state.alive) do
+      %{state | leader: maxrank(MapSet.put(state.alive, state.name))}
+    else
+      state
     end
   end
 
