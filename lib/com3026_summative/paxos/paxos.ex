@@ -1,155 +1,138 @@
-# TODO: magic happens here
 defmodule Paxos do
-  def start(name, processes, client \\ :none) do
-    pid = spawn(ReliableFIFOBroadcast, :init, [name, processes, client])
+  def start(name, participants) do
+    pid = spawn(Paxos, :init, [name, participants])
 
     case :global.re_register_name(name, pid) do
       :yes -> pid
-      :no -> :error
     end
 
     IO.puts("registered #{name}")
     pid
   end
 
-  # Init event must be the first
-  # one after the component is created
-  def init(name, processes, client) do
-    start_beb(name)
-
+  def init(name, participants) do
     state = %{
       name: name,
-      client: if(is_pid(client), do: client, else: self()),
-      processes: processes,
-      # Add state components below as necessary
-      delivered: %MapSet{},
-      pending: %MapSet{},
-      next:
-        for p <- processes, into: %{} do
-          {p, 1}
-        end,
-      seq_no: 0
+      processes: participants,
+      quorum: div(length(participants), 2) + 1,
+      bal: 0, # highest ballot in which this process participated
+      a_bal: 0,  # highest ballot that was ever accepted by this process
+      a_val: nil, # value associated with a_bal
+      prepared: [],
+      accepted: 0,
+      value: nil,
+      decided: %{}
     }
 
     run(state)
   end
 
-  # Helper functions: DO NOT REMOVE OR MODIFY
-  defp get_beb_name() do
-    {:registered_name, parent} = Process.info(self(), :registered_name)
-    String.to_atom(Atom.to_string(parent) <> "_beb")
-  end
-
-  defp start_beb(name) do
-    Process.register(self(), name)
-    pid = spawn(BestEffortBroadcast, :init, [])
-    Process.register(pid, get_beb_name())
-    Process.link(pid)
-  end
-
-  defp beb_broadcast(m, dest) do
-    BestEffortBroadcast.beb_broadcast(Process.whereis(get_beb_name()), m, dest)
-  end
-
-  # End of helper functions
 
   def run(state) do
-    state =
-      receive do
-        {:broadcast, m} ->
-          IO.puts("#{inspect(state.name)}: FIFO-broadcast: #{inspect(m)}")
-
-          # Increase local counter
-          state = %{state | seq_no: state.seq_no + 1}
-
-          # Create a unique message identifier from state.name and state.seqno.
-          unique_id = {state.name, state.seq_no}
-
-          # Form data payload
-          data_msg = {:data, self(), unique_id, m}
-
-          # Broadcast message
-          beb_broadcast(data_msg, state.processes)
-
+    state = receive do
+      # ====================
+      # ----- Acceptor -----
+      # ====================
+      {:prepare, client, proposer, b} ->
+        # If the ballot is greater than the currently highest seen ballot send a prepared message
+        if b > state.bal do
+          state = %{state | bal: b}
+          send(proposer, {:prepared, client, b, state.a_bal, state.a_val})
           state
+        else
+          send(proposer, {:nack, client, b})
+        end
+        state
 
-        # Add further message handlers as necessary.
-        {:data, proc, unique_id, m} ->
-          # If <proc, seqno> was already delivered, do nothing.
-          if MapSet.member?(state.delivered, unique_id) do
-            state
-            # Otherwise, update delivered, generate a deliver event for the
-            # upper layer, and re-broadcast (echo) the received message.
-          else
-            state = %{state | pending: MapSet.put(state.pending, {proc, unique_id, m})}
-
-            # If there is a message the can be delivered, deliver it.
-            if pending_msg(state) do
-              deliver(proc, unique_id, m, state)
-              # Otherwise, do nothing.
-            else
-              state
-            end
-          end
-
-        # Message handle for delivery event if started without the client argument
-        # (i.e., this process is the default client); optional, but useful for debugging.
-        {:deliver, pid, proc, m} ->
-          IO.puts(
-            "#{inspect(state.name)}, #{inspect(pid)}: RFIFO-deliver: #{inspect(m)} from #{inspect(proc)}"
-          )
-
+      {:accept, client, proposer, b, val} ->
+        # If the ballot is greater than the current ballot, accept the ballot and send an accepted message
+        if b >= state.a_bal do
+          state = %{state | bal: b, a_bal: b, a_val: val}
+          send(proposer, {:accepted, client, b})
           state
-      end
+        else
+          send(proposer, {:nack, client, b})
+        end
+        state
 
+      {:decided, b, v} ->
+        %{state | decided: Map.put(state.decided, b, v)}
+
+      # ====================
+      # ----- Proposer -----
+      # ====================
+      {:propose, client, leader_pid, inst, value} ->
+        if leader_pid == self(), do: beb_broadcast({:prepare, client, self(), inst}, state.processes)
+        %{state | value: value}
+
+      {:prepared, client, b, a_bal, a_val} ->
+        state = %{state | prepared: [{b, a_bal, a_val} | state.prepared]}
+        if length(state.prepared) >= state.quorum do
+          v = decide_proposal(state)
+          beb_broadcast({:accept, client, self(), b, v}, state.processes)
+          %{state | prepared: []}
+        end
+        state
+
+      {:accepted, client, b} ->
+        state = %{state | accepted: state.accepted + 1}
+
+        if state.accepted >= state.quorum do
+          beb_broadcast({:decided, b, state.value}, state.processes)
+          send(client, {:decided, state.value})
+          %{state | accepted: []}
+        end
+
+        state
+
+      {:nack, client, b} ->
+        %{state | decided: Map.put(state.decided, b, :aborted)}
+        send(client, {:abort})
+
+      _ -> state
+    end
     run(state)
   end
 
-  # Search pending and deliver any messages that can be delivered.
-  defp deliver(state) do
-    if pending_msg(state) do
-      {proc, unique_id, msg} = pending_msg(state)
-      deliver(proc, unique_id, msg, state)
-    else
-      state
+
+  def propose(pid, inst, value, t) do
+    # propose(pid, inst, value, t) is a function that takes the process identifier pid of an
+    # Elixir process running a Paxos replica, an instance identifier inst, a timeout t in milliseconds,
+    # and proposes a value value for the instance of consensus associated with inst.
+    send(pid, {:propose, self(), pid, inst, value})
+    receive do
+      {:decided, v} -> {:decided, v}
+      {:abort} -> {:abort}
+    after
+      t -> {:timeout}
     end
   end
 
-  # Deliver and rebroadcast a message, then search the pending set with deliver(state).
-  defp deliver(proc, unique_id, m, state) do
-    # increase expected message id of a process
-    state = %{
-      state
-      | next: Map.put(state.next, get_name(unique_id), state.next[get_name(unique_id)] + 1)
-    }
-
-    # remove pending
-    state = %{state | pending: MapSet.delete(state.pending, {proc, unique_id, m})}
-
-    # deliver
-    state = %{state | delivered: MapSet.put(state.delivered, unique_id)}
-    send(state.client, {:deliver, self(), get_name(unique_id), m})
-
-    # rebroadcast
-    beb_broadcast({:data, proc, unique_id, m}, state.processes)
-    # IO.puts("#{inspect(state)}")
-    deliver(state)
+  # search for a value with higher ballot TODO: better commenting
+  defp decide_proposal(state) do
+    {_, a_bal, a_val} = Enum.max_by(state.prepared, fn {_, a_bal, _} -> a_bal end)
+    case a_bal do
+      0 -> state.value # no other process has accepted anything else # TODO:
+      _ -> a_val
+    end
   end
 
-  # Check if there is a pending message that can be delivered.
-  defp pending_msg(state) do
-    Enum.find(state.pending, fn x ->
-      get_seq(elem(x, 1)) == state.next[get_name(elem(x, 1))]
-    end)
+
+  def get_decision(pid, inst, t) do
+    # TODO:
+    # get_decision(pid, inst, t) is a function that takes the process identifier pid of an
+    # Elixir process running a Paxos replica, an instance identifier inst, and a timeout t in milliseconds.
+    # It returns v ≠ nil if v is the value decided by the consensus instance inst; it returns nil in
+    # all other cases.
   end
 
-  # Get process name from unique_id.
-  defp get_name(unique_id) do
-    elem(unique_id, 0)
-  end
+  def beb_broadcast(m, dest), do: for(p <- dest, do: unicast(m, p))
 
-  # Get process sequence number from unique_id.
-  defp get_seq(unique_id) do
-    elem(unique_id, 1)
+  # Send message m point-to-point to process p
+  defp unicast(m, p) do
+    case :global.whereis_name(p) do
+      pid when is_pid(pid) -> send(pid, m)
+      :undefined -> :ok
+    end
   end
 end
