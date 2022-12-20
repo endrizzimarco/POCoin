@@ -4,7 +4,6 @@ defmodule EventualLeaderElection do
 
     case :global.re_register_name(name, pid) do
       :yes -> pid
-      :no -> :error
     end
 
     IO.puts("registered #{name}")
