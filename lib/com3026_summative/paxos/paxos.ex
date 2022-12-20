@@ -17,77 +17,98 @@ defmodule Paxos do
       quorum: div(length(participants), 2) + 1,
       bal: 0, # highest ballot in which this process participated
       a_bal: 0,  # highest ballot that was ever accepted by this process
-      a_val: nil, # value associated with a_bal
-      prepared: [],
-      accepted: 0,
-      value: nil,
-      decided: %{}
+      a_val: nil, # value associated with highest accepted ballot a_bal
+      proposed_value: %{}, # value proposed for a round:  %{inst => value}
+      prepared: %{}, # received prepared messages for a round:  %{inst => [{bal, a_bal, a_val}]}
+      accepted: %{}, # received accepted messages for a round:  %{inst => count}
+      decided: %{} # log of decided values:  %{inst => value}
     }
 
     run(state)
   end
-
 
   def run(state) do
     state = receive do
       # ====================
       # ----- Acceptor -----
       # ====================
-      {:prepare, client, proposer, b} ->
-        # If the ballot is greater than the currently highest seen ballot send a prepared message
-        if b > state.bal do
-          state = %{state | bal: b}
-          send(proposer, {:prepared, client, b, state.a_bal, state.a_val})
+      {:prepare, client, proposer, inst} ->
+        # If the ballot is greater than the currently highest seen ballot, send back a :prepared message
+        if inst > state.bal do
+          state = %{state | bal: inst}
+          send(proposer, {:prepared, client, inst, state.a_bal, state.a_val})
           state
         else
-          send(proposer, {:nack, client, b})
+          send(proposer, {:nack, client, inst})
         end
         state
 
-      {:accept, client, proposer, b, val} ->
-        # If the ballot is greater than the current ballot, accept the ballot and send an accepted message
-        if b >= state.a_bal do
-          state = %{state | bal: b, a_bal: b, a_val: val}
-          send(proposer, {:accepted, client, b})
+      {:accept, client, proposer, inst, v} ->
+        # If the ballot is greater than the current ballot, accept the ballot and send an :accepted message
+        if inst >= state.a_bal do
+          state = %{state | bal: inst, a_bal: inst, a_val: v}
+          send(proposer, {:accepted, client, inst, v})
           state
         else
-          send(proposer, {:nack, client, b})
+          send(proposer, {:nack, client, inst})
         end
         state
 
-      {:decided, b, v} ->
-        %{state | decided: Map.put(state.decided, b, v)}
+      {:decided, inst, v} ->
+        # delete intermidiary data and update decided value for this round
+        %{state | decided: Map.put(state.decided, inst, v)}
 
       # ====================
       # ----- Proposer -----
       # ====================
       {:propose, client, leader_pid, inst, value} ->
+        # brodcast prepare message to all acceptors
         if leader_pid == self(), do: beb_broadcast({:prepare, client, self(), inst}, state.processes)
-        %{state | value: value}
+        # store proposal for this round
+        %{state | proposed_value: Map.put(state.proposed_value, inst, value)}
 
-      {:prepared, client, b, a_bal, a_val} ->
-        state = %{state | prepared: [{b, a_bal, a_val} | state.prepared]}
-        if length(state.prepared) >= state.quorum do
-          v = decide_proposal(state)
-          beb_broadcast({:accept, client, self(), b, v}, state.processes)
-          %{state | prepared: []}
+      {:prepared, client, inst, a_bal, a_val} ->
+        # collect :prepared messages for an instance of paxos
+        state = %{state | prepared: Map.update(state.prepared, inst, [], fn list -> [{a_bal, a_val} | list] end)}
+
+        # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
+        if length(state.prepared[inst]) >= state.quorum do
+          v = decide_proposal(inst, state)
+          beb_broadcast({:accept, client, self(), inst, v}, state.processes)
+          %{state | prepared: Map.delete(state.prepared, inst),
+                    proposed_value: Map.delete(state.proposed_value, inst)} # cleanup
         end
         state
 
-      {:accepted, client, b} ->
-        state = %{state | accepted: state.accepted + 1}
+      {:accepted, client, inst, v} ->
+        # increment accepted count for this ballot
+        state = %{state | accepted: Map.update(state.accepted, inst, 1, fn x -> x + 1 end)}
 
-        if state.accepted >= state.quorum do
-          beb_broadcast({:decided, b, state.value}, state.processes)
-          send(client, {:decided, state.value})
-          %{state | accepted: []}
+        # if quorum of prepared messages, commit value with paxos processes and communicate back to client
+        if state.accepted[inst] >= state.quorum do
+          beb_broadcast({:decided, inst, v}, state.processes)
+          send(client, {:decided, v})
+          %{state | accepted: Map.delete(state.accepted, inst)} # cleanup
         end
-
         state
 
-      {:nack, client, b} ->
-        %{state | decided: Map.put(state.decided, b, :aborted)}
+      {:nack, client, inst} ->
+        # ensure safety by aborting if a nack is received
+        %{state | decided: Map.put(state.decided, inst, :aborted)}
         send(client, {:abort})
+
+      # =====================
+      # ----- Utilities -----
+      # =====================
+      {:get_decision, client, pid, inst} ->
+        if pid == self() do
+          if Map.has_key?(state.decided, inst) do
+            send(client, {:ok, state.decided[inst]})
+          else
+            send(client, {:error, "no decision for paxos instance #{inst}"})
+          end
+        end
+        state
 
       _ -> state
     end
@@ -95,6 +116,9 @@ defmodule Paxos do
   end
 
 
+  # =======================
+  # ----- Module API  -----
+  # =======================
   def propose(pid, inst, value, t) do
     # propose(pid, inst, value, t) is a function that takes the process identifier pid of an
     # Elixir process running a Paxos replica, an instance identifier inst, a timeout t in milliseconds,
@@ -108,22 +132,33 @@ defmodule Paxos do
     end
   end
 
-  # search for a value with higher ballot TODO: better commenting
-  defp decide_proposal(state) do
-    {_, a_bal, a_val} = Enum.max_by(state.prepared, fn {_, a_bal, _} -> a_bal end)
-    case a_bal do
-      0 -> state.value # no other process has accepted anything else # TODO:
-      _ -> a_val
+  def get_decision(pid, inst, t) do
+    # get_decision(pid, inst, t) is a function that takes the process identifier pid of an Elixir process
+    # running a Paxos replica, an instance identifier inst, and a timeout t in milliseconds. It returns
+    # v ≠ nil if v is the value decided by the consensus instance inst; it returns nil in all other cases.
+    send(pid, {:get_decision, self(), pid, inst})
+    receive do
+      {:ok, v} -> v
+      {:error, m} ->
+        IO.puts(m)
+        nil
+      true -> nil
+    after
+      t -> {:timeout}
     end
   end
 
 
-  def get_decision(pid, inst, t) do
-    # TODO:
-    # get_decision(pid, inst, t) is a function that takes the process identifier pid of an
-    # Elixir process running a Paxos replica, an instance identifier inst, and a timeout t in milliseconds.
-    # It returns v ≠ nil if v is the value decided by the consensus instance inst; it returns nil in
-    # all other cases.
+  # ============================
+  # ----- Helper functions -----
+  # ============================
+  # returns the value to use for a proposal during a round of paxos
+  defp decide_proposal(inst, state) do
+    {a_bal, a_val} = Enum.max_by(state.prepared[inst], fn {a_bal, _} -> a_bal end)
+    case a_bal do
+      0 -> state.proposed_value[inst] # no accepted proposals, free to use own proposed value
+      _ -> a_val # a process has accepted another proposal, override value
+    end
   end
 
   def beb_broadcast(m, dest), do: for(p <- dest, do: unicast(m, p))
