@@ -10,52 +10,78 @@ defmodule Paxos do
   end
 
   def init(name, participants) do
+    # process state
     state = %{
       name: name,
       processes: participants,
       quorum: div(length(participants), 2) + 1,
-      bal: 0, # highest ballot in which this process participated
-      a_bal: 0,  # highest ballot that was ever accepted by this process
-      a_val: nil, # value associated with highest accepted ballot a_bal
-      proposed_value: %{}, # value proposed for a round:  %{inst => value}
-      prepared: %{}, # received prepared messages for a round:  %{inst => [{bal, a_bal, a_val}]}
-      accepted: %{}, # received accepted messages for a round:  %{inst => count}
-      decided: %{} # log of decided values:  %{inst => value}
+      decided: %{} # decided value for this paxos instance %{inst = > value}
     }
 
-    run(state)
+    # holds intermdiary state for all current paxos runs
+    ps = %{}
+
+    run(state, ps)
   end
 
-  def run(state) do
-    state = receive do
+  defp init_proposer_state(instance_store, inst, proposed_value, client) do
+    Map.put(instance_store, inst, %{
+      # === acceptor variables ===
+      bal: nil, # highest ballot in which this process participated
+      a_bal: nil, # highest ballot that was ever accepted by this process %{inst = > {a_bal, a_val}}
+      a_val: nil, # value associated with highest accepted ballot a_bal
+      # === proposer variables ===
+      proposed_value: proposed_value, # value passed to a leader in the propose() function
+      prepared: [], # received prepared messages for a ballot: [{bal, a_bal, a_val}]
+      accepted: 0, # received accepted messages for a ballot
+      client: client
+      }
+    )
+  end
+
+  defp init_acceptor_state(instance_store, inst) do
+    Map.put(instance_store, inst, %{bal: nil, a_bal: nil, a_val: nil})
+  end
+
+  def run(state, ps) do
+    {state, ps} = receive do
       # ====================
       # ----- Acceptor -----
       # ====================
-      {:prepare, client, proposer, inst} ->
+      {:prepare, proposer, b} ->
+        i = inst(b)
         # If the ballot is greater than the currently highest seen ballot, send back a :prepared message
-        if inst > state.bal do
-          state = %{state | bal: inst}
-          send(proposer, {:prepared, client, inst, state.a_bal, state.a_val})
-          state
+        ps = if unknown_ballot(ps, i) , do: init_acceptor_state(ps, i), else: ps
+        if b > ps[i].bal do
+          IO.puts("#{inspect state.name}: promised ballot #{inspect b} to #{inspect proposer}")
+          ps = update_paxos_state(ps, i, :bal, b)
+          send(proposer, {:prepared, b, ps[i].a_bal, ps[i].a_val})
+          {state, ps}
         else
-          send(proposer, {:nack, client, inst})
+          send(proposer, {:nack, i}) # tell proposer it has seen a higher ballot
+          {state, ps}
         end
-        state
 
-      {:accept, client, proposer, inst, v} ->
+      {:accept, proposer, b, v} ->
+        i = inst(b)
         # If the ballot is greater than the current ballot, accept the ballot and send an :accepted message
-        if inst >= state.a_bal do
-          state = %{state | bal: inst, a_bal: inst, a_val: v}
-          send(proposer, {:accepted, client, inst, v})
-          state
+        ps = if unknown_ballot(ps, i), do: init_acceptor_state(ps, i), else: ps
+        if b >= ps[i].bal do
+          IO.puts("#{inspect state.name}: accepted ballot #{inspect b} with value #{inspect v}")
+          ps = update_paxos_state(ps, i, :bal, b) # TODO: fix
+          ps = update_paxos_state(ps, i, :a_bal, b)
+          ps = update_paxos_state(ps, i,:a_val, v)
+          send(proposer, {:accepted, i, v})
+          {state, ps}
         else
-          send(proposer, {:nack, client, inst})
+          send(proposer, {:nack, i}) # tell proposer it has seen a higher ballot
+          {state, ps}
         end
-        state
 
       {:decided, inst, v} ->
-        # delete intermidiary data and update decided value for this round
-        %{state | decided: Map.put(state.decided, inst, v)}
+        state = %{state | decided: Map.put(state.decided, inst, v)} # update decided value for instance
+        ps = Map.delete(ps, inst) # cleanup intermidiary state
+        {state, ps}
 
       # ====================
       # ----- Proposer -----
@@ -64,39 +90,53 @@ defmodule Paxos do
         IO.puts("#{inspect state.name}: received propose request for instance #{inspect inst} with value #{inspect value}")
 
         # brodcast prepare message to all acceptors
-        if leader_pid == self(), do: beb_broadcast({:prepare, client, self(), inst}, state.processes)
-        # store proposal for this round
-        %{state | proposed_value: Map.put(state.proposed_value, inst, value)}
-
-      {:prepared, client, inst, a_bal, a_val} ->
-        # collect :prepared messages for an instance of paxos
-        state = %{state | prepared: Map.update(state.prepared, inst, [], fn list -> [{a_bal, a_val} | list] end)}
-
-        # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
-        if length(state.prepared[inst]) >= state.quorum do
-          v = decide_proposal(inst, state)
-          beb_broadcast({:accept, client, self(), inst, v}, state.processes)
-          %{state | prepared: Map.delete(state.prepared, inst),
-                    proposed_value: Map.delete(state.proposed_value, inst)} # cleanup
+        if leader_pid == self() do
+          b = {inst, state.name} # ensure unique ballots to avoid conflicts
+          beb_broadcast({:prepare, self(), b}, state.processes)
+          ps = init_proposer_state(ps, inst, value, client) # init paxos state for this instance
+          {state, ps}
+        else
+          {state, ps}
         end
-        state
 
-      {:accepted, client, inst, v} ->
-        # increment accepted count for this ballot
-        state = %{state | accepted: Map.update(state.accepted, inst, 1, fn x -> x + 1 end)}
-
-        # if quorum of prepared messages, commit value with paxos processes and communicate back to client
-        if state.accepted[inst] >= state.quorum do
-          beb_broadcast({:decided, inst, v}, state.processes)
-          send(client, {:decided, v})
-          %{state | accepted: Map.delete(state.accepted, inst)} # cleanup
+      {:prepared, b, a_bal, a_val} ->
+        i = inst(b)
+        case already_decided(ps, i) do
+          true -> {state, ps}
+          false ->
+            ps = update_paxos_state(ps, i, :prepared, [{a_bal, a_val} | ps[i].prepared]) # append :prepared messages
+            # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
+            if length(ps[i].prepared) >= state.quorum do
+              v = decide_proposal(i, ps)
+              beb_broadcast({:accept, self(), b, v}, state.processes)
+              ps = update_paxos_state(ps, i, :prepared, [])  # reset prepared messages
+              {state, ps}
+            else
+              {state, ps}
+            end
         end
-        state
 
-      {:nack, client, inst} ->
+      {:accepted, inst, v} ->
+        case already_decided(ps, inst) do
+          true -> {state, ps}
+          false ->
+            ps = increment_accepted_count(ps, inst)
+            # if quorum of prepared messages, commit value with paxos processes and communicate back to client
+            if ps[inst].accepted >= state.quorum do
+              send(ps[inst].client, {:decided, v})
+              beb_broadcast({:decided, inst, v}, state.processes)
+              ps = Map.delete(ps, inst) # cleanup intermediary state for this instance
+              {state, ps}
+            else
+              {state, ps}
+            end
+          end
+
+      {:nack, inst} ->
         # ensure safety by aborting if a nack is received
-        %{state | decided: Map.put(state.decided, inst, :aborted)}
-        send(client, {:abort})
+        IO.puts("#{inspect state.name}: received nack for instance #{inspect inst}")
+        send(ps[inst].client, {:abort})
+        {state, ps}
 
       # =====================
       # ----- Utilities -----
@@ -109,11 +149,11 @@ defmodule Paxos do
             send(client, {:error, "no decision for paxos instance #{inst}"})
           end
         end
-        state
+        {state, ps}
 
-      _ -> state
+      _ -> {state, ps}
     end
-    run(state)
+    run(state, ps)
   end
 
 
@@ -139,10 +179,8 @@ defmodule Paxos do
     # v ≠ nil if v is the value decided by the consensus instance inst; it returns nil in all other cases.
     send(pid, {:get_decision, self(), pid, inst})
     receive do
-      {:ok, v} -> v
-      {:error, m} ->
-        IO.puts(m)
-        nil
+      {:ok, v} when v != nil -> v
+      {:error, m} -> IO.puts(m); nil
       true -> nil
     after
       t -> {:timeout}
@@ -154,12 +192,34 @@ defmodule Paxos do
   # ----- Helper functions -----
   # ============================
   # returns the value to use for a proposal during a round of paxos
-  defp decide_proposal(inst, state) do
-    {a_bal, a_val} = Enum.max_by(state.prepared[inst], fn {a_bal, _} -> a_bal end)
+  defp decide_proposal(inst, instance_state) do
+    {a_bal, a_val} = Enum.max_by(instance_state[inst].prepared, fn {a_bal, a_val} -> {a_bal, a_val} end)
     case a_bal do
-      0 -> state.proposed_value[inst] # no accepted proposals, free to use own proposed value
+      nil -> instance_state[inst].proposed_value # no accepted proposals, free to use own proposed value
       _ -> a_val # a process has accepted another proposal, override value
     end
+  end
+
+  defp unknown_ballot(instance_store, inst) do
+    not Map.has_key?(instance_store, inst)
+  end
+
+  defp already_decided(instance_store, inst) do
+    not Map.has_key?(instance_store, inst)
+  end
+
+  # perfoms a deep update of the paxos state for a given instance
+  defp update_paxos_state(instance_store, inst, key, value) do
+    Map.update!(instance_store, inst, fn(map) -> Map.replace(map, key, value) end)
+  end
+
+  defp increment_accepted_count(instance_store, inst) do
+    Map.update!(instance_store, inst, fn(map) -> Map.update(map, :accepted, 1, fn x -> x + 1 end) end)
+  end
+
+  # given a ballot {inst, p_name}, return inst
+  defp inst(b) do
+    elem(b, 0)
   end
 
   def beb_broadcast(m, dest), do: for(p <- dest, do: unicast(m, p))
