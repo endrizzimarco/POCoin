@@ -1,10 +1,6 @@
 defmodule Paxos do
-  # compile helper modules
-  IEx.Helpers.c "beb_broadcast.ex", "."
-
   def start(name, participants) do
     pid = spawn(Paxos, :init, [name, participants])
-
     case :global.re_register_name(name, pid) do
       :yes -> pid
     end
@@ -14,6 +10,7 @@ defmodule Paxos do
 
   def init(name, participants) do
     # process state
+    start_beb(name)
     state = %{
       name: name,
       processes: participants,
@@ -95,7 +92,7 @@ defmodule Paxos do
         # brodcast prepare message to all acceptors
         if leader_pid == self() do
           b = {inst, state.name} # ensure unique ballots to avoid conflicts
-          BEB_Broadcast.broadcast({:prepare, self(), b}, state.processes)
+          beb_broadcast({:prepare, self(), b}, state.processes)
           ps = init_proposer_state(ps, inst, value, client) # init paxos state for this instance
           {state, ps}
         else
@@ -111,7 +108,7 @@ defmodule Paxos do
             # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
             if length(ps[i].prepared) >= state.quorum do
               v = decide_proposal(i, ps)
-              BEB_Broadcast.broadcast({:accept, self(), b, v}, state.processes)
+              beb_broadcast({:accept, self(), b, v}, state.processes)
               ps = update_paxos_state(ps, i, :prepared, [])  # reset prepared messages
               {state, ps}
             else
@@ -127,7 +124,7 @@ defmodule Paxos do
             # if quorum of prepared messages, commit value with paxos processes and communicate back to client
             if ps[inst].accepted >= state.quorum do
               send(ps[inst].client, {:decided, v})
-              BEB_Broadcast.broadcast({:decided, inst, v}, state.processes)
+              beb_broadcast({:decided, inst, v}, state.processes)
               ps = Map.delete(ps, inst) # cleanup intermediary state for this instance
               {state, ps}
             else
@@ -137,7 +134,7 @@ defmodule Paxos do
 
       {:nack, inst} ->
         # ensure safety by aborting if a nack is received
-        IO.puts("#{inspect state.name}: received nack for instance #{inspect inst}")
+        IO.puts("#{inspect state.name}: received nack for instance #{inspect inst} - AAA #{inspect ps}}")
         send(ps[inst].client, {:abort})
         {state, ps}
 
@@ -223,6 +220,23 @@ defmodule Paxos do
   # given a ballot {inst, p_name}, return inst
   defp inst(b) do
     elem(b, 0)
+  end
+
+  # BEB Helpers
+  defp get_beb_name() do
+    {:registered_name, parent} = Process.info(self(), :registered_name)
+    String.to_atom(Atom.to_string(parent) <> "_beb")
+  end
+
+  defp start_beb(name) do
+    Process.register(self(), name)
+    pid = spawn(BestEffortBroadcast, :init, [])
+    Process.register(pid, get_beb_name())
+    Process.link(pid)
+  end
+
+  defp beb_broadcast(m, dest) do
+    BestEffortBroadcast.beb_broadcast(Process.whereis(get_beb_name()), m, dest)
   end
 
 end
