@@ -10,6 +10,7 @@ defmodule Paxos do
   end
 
   def init(name, participants) do
+    start_beb(name)
     state = %{
       name: name,
       processes: participants,
@@ -192,13 +193,20 @@ defmodule Paxos do
     elem(instance, 0)
   end
 
-  def beb_broadcast(m, dest), do: for(p <- dest, do: unicast(m, p))
+  # BEB Helper functions
+  defp get_beb_name() do
+    {:registered_name, parent} = Process.info(self(), :registered_name)
+    String.to_atom(Atom.to_string(parent) <> "_beb")
+  end
 
-  # Send message m point-to-point to process p
-  defp unicast(m, p) do
-    case :global.whereis_name(p) do
-      pid when is_pid(pid) -> send(pid, m)
-      :undefined -> :ok
-    end
+  defp start_beb(name) do
+    Process.register(self(), name)
+    pid = spawn(BestEffortBroadcast, :init, [])
+    Process.register(pid, get_beb_name())
+    Process.link(pid)
+  end
+
+  defp beb_broadcast(m, dest) do
+    BestEffortBroadcast.beb_broadcast(Process.whereis(get_beb_name()), m, dest)
   end
 end
