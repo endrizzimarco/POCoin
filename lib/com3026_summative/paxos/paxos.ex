@@ -1,4 +1,7 @@
 defmodule Paxos do
+  # compile helper modules
+  IEx.Helpers.c "beb_broadcast.ex", "."
+
   def start(name, participants) do
     pid = spawn(Paxos, :init, [name, participants])
 
@@ -92,7 +95,7 @@ defmodule Paxos do
         # brodcast prepare message to all acceptors
         if leader_pid == self() do
           b = {inst, state.name} # ensure unique ballots to avoid conflicts
-          beb_broadcast({:prepare, self(), b}, state.processes)
+          BEB_Broadcast.broadcast({:prepare, self(), b}, state.processes)
           ps = init_proposer_state(ps, inst, value, client) # init paxos state for this instance
           {state, ps}
         else
@@ -108,7 +111,7 @@ defmodule Paxos do
             # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
             if length(ps[i].prepared) >= state.quorum do
               v = decide_proposal(i, ps)
-              beb_broadcast({:accept, self(), b, v}, state.processes)
+              BEB_Broadcast.broadcast({:accept, self(), b, v}, state.processes)
               ps = update_paxos_state(ps, i, :prepared, [])  # reset prepared messages
               {state, ps}
             else
@@ -124,7 +127,7 @@ defmodule Paxos do
             # if quorum of prepared messages, commit value with paxos processes and communicate back to client
             if ps[inst].accepted >= state.quorum do
               send(ps[inst].client, {:decided, v})
-              beb_broadcast({:decided, inst, v}, state.processes)
+              BEB_Broadcast.broadcast({:decided, inst, v}, state.processes)
               ps = Map.delete(ps, inst) # cleanup intermediary state for this instance
               {state, ps}
             else
@@ -222,13 +225,4 @@ defmodule Paxos do
     elem(b, 0)
   end
 
-  def beb_broadcast(m, dest), do: for(p <- dest, do: unicast(m, p))
-
-  # Send message m point-to-point to process p
-  defp unicast(m, p) do
-    case :global.whereis_name(p) do
-      pid when is_pid(pid) -> send(pid, m)
-      :undefined -> :ok
-    end
-  end
 end
