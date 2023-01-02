@@ -40,7 +40,7 @@ defmodule Wallet do
         send(client, {:ok, transaction})
 
         # update state for new transaction
-        addresses = if change_addr, do: %{state | addresses: Map.put(state.addresses, change_addr, keypair)}, else: state.addresses
+        addresses = if change_addr != nil, do: %{state | addresses: Map.put(state.addresses, change_addr, keypair)}, else: state.addresses
         %{state | pending: Map.put(state.pending, txid, transaction),
                   balance: state.balance - amount,
                   available_UTXOs: Map.drop(state.available_UTXOs, transaction.inputs),
@@ -117,7 +117,7 @@ defmodule Wallet do
   # =====================
   defp create_transaction(state, from_addrs, to_addr, amount, change, change_addr) do
     pub_keys = for addr <- from_addrs, do: {state.addresses[addr][0]}
-    outputs = if change_addr, do: [{to_addr, amount}], else: [{to_addr, amount}, {change_addr, change}]
+    outputs = if change_addr != nil, do: [{to_addr, amount}], else: [{to_addr, amount}, {change_addr, change}]
 
     details = %{
       inputs: pub_keys, # will be turned into addresses by the node
