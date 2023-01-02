@@ -67,7 +67,7 @@ defmodule Paxos do
       {:decided, inst, v} ->
         # update decided value for this round and delete intermidiary data
         if not already_decided(state, inst) do
-          beb_broadcast({:decided, inst, v}, state.processes) # ensure everyone knows
+          beb_broadcast({:decided, inst, v}, state.processes) # rb: ensure everyone knows even when proposer fails
           %{state | decided: Map.put(state.decided, inst, v),
                     bal: Map.delete(state.bal, inst),
                     a_bal: Map.delete(state.a_bal, inst),
@@ -93,7 +93,7 @@ defmodule Paxos do
         state = %{state | prepared: Map.update(state.prepared, inst(b), [{a_bal, a_val}], fn list -> [{a_bal, a_val} | list] end)}
 
         # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
-        if length(state.prepared[inst(b)]) >= state.quorum do
+        if length(state.prepared[inst(b)]) == state.quorum do
           # IO.puts("#{inspect state.name}: received quorum of prepared messages for instance #{inspect inst(b)}")
           v = decide_proposal(inst(b), state)
           beb_broadcast({:accept, self(), b, v}, state.processes)
@@ -107,7 +107,7 @@ defmodule Paxos do
         # increment accepted count for this ballot
         state = %{state | accepted: Map.update(state.accepted, inst(b), 1, fn x -> x + 1 end)}
         # if quorum of prepared messages, commit value with paxos processes and communicate back to client
-        if state.accepted[inst(b)] >= state.quorum do
+        if state.accepted[inst(b)] == state.quorum do
           # IO.puts("#{inspect state.name}: decided value #{inspect v} for instance #{inspect inst(b)}")
           beb_broadcast({:decided, inst(b), v}, state.processes)
           send(state.client[b], {:decided, v})
@@ -120,8 +120,9 @@ defmodule Paxos do
         if Map.has_key?(state.client, b) do
           send(state.client[b], {:abort}) # ensure safety by aborting if a nack is received
           %{state | client: Map.delete(state.client, b)}
+        else
+          state
         end
-        state
 
       # =====================
       # ----- Utilities -----

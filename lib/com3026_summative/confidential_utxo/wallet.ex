@@ -1,6 +1,7 @@
 # ==== wallet API ====
 #   send(w, address, amount) ~ send money to another wallet
 #   generate_address(w) ~ generate a new address for the wallet
+#   add_keypair(w, {pub, priv}) ~ add a keypair to the wallet
 #   balance(w) ~ get wallet balance
 #   history(w) ~ get the history of every transaction
 
@@ -21,13 +22,15 @@ defmodule Wallet do
   def run(state) do
     state = receive do
       {:spend, client, to_addr, amount} ->
+        state = poll_for_blocks(state)
+        IO.puts("#{state.balance} available")
         # select UTXOs to spend and generate a change address
         {from_addrs, change} = select_utxos(state, amount)
 
         # generate a new address for the change
         {change_addr, keypair} = cond do
           change > 0 -> generate_address()
-          change < 0 -> raise("not enough funds")
+          change < 0 -> send(client, :error); raise("not enough funds")
           change == 0 -> nil
         end
 
@@ -36,7 +39,12 @@ defmodule Wallet do
         txid = :crypto.hash(:sha256, transaction)
 
         # send transaction to node for processing
-        send(state.node, {:transaction, transaction, txid})
+        send(state.node, {:new_transaction, transaction, txid})
+        receive do
+          {:ok, txid} -> IO.puts("transaction #{txid} accepted by node #{state.node}")
+          {:bad_transaction, _} -> IO.puts("transaction #{txid} rejected: invalid payload")
+          after 1000 -> IO.puts("rejected: timeout")
+        end
         send(client, {:ok, transaction})
 
         # update state for new transaction
@@ -48,7 +56,14 @@ defmodule Wallet do
 
       {:generate_address, client} ->
         {addr, keypair} = generate_address()
-        send(client, {:address, addr})
+        send(client, {:generated_address, addr})
+        %{state | addresses: Map.put(state.addresses, addr, keypair)}
+
+      {:add_keypair, client, keypair} ->
+        {pub_key, _} = keypair
+        addr = :crypto.hash(:sha256, pub_key) |> Base.encode64()
+        send(client, {:added_keypair, addr})
+        IO.puts("added address #{addr} to wallet #{inspect(self())}")
         %{state | addresses: Map.put(state.addresses, addr, keypair)}
 
       {:get_balance, client} ->
@@ -74,7 +89,6 @@ defmodule Wallet do
     send(w, {:spend, self(), address, amount})
     receive do
       {:transaction, data} -> data
-      _ -> :fail
     after
       100 -> :timeout
     end
@@ -84,8 +98,17 @@ defmodule Wallet do
   def generate_address(w) do
     send(w, {:generate_address, self()})
     receive do
-      {:transaction, data} -> data
-      _ -> :fail
+      {:generated_address, data} -> data
+    after
+      100 -> :timeout
+    end
+  end
+
+  # add keypair to the wallet
+  def add_keypair(w, keypair) do
+    send(w, {:add_keypair, self(), keypair})
+    receive do
+      {:added_keypair, data} -> data
     after
       100 -> :timeout
     end
@@ -96,7 +119,6 @@ defmodule Wallet do
     send(w, {:get_balance, self()})
     receive do
       {:balance, data} -> data
-      _ -> :fail
     after
       100 -> :timeout
     end
@@ -106,7 +128,6 @@ defmodule Wallet do
     send(w, {:get_history, self()})
     receive do
       {:history, data} -> data
-      _ -> :fail
     after
       100 -> :timeout
     end
@@ -138,7 +159,7 @@ defmodule Wallet do
   # generates a key pair and its corresponding address
   defp generate_address() do
     {pub_key, priv_key} = :crypto.generate_key(:ecdh, :secp256k1)
-    addr = :crypto.hash(:sha256, pub_key) |> Base.encode16()
+    addr = :crypto.hash(:sha256, pub_key) |> Base.encode64()
     {addr, {pub_key, priv_key}}
   end
 
@@ -152,27 +173,26 @@ defmodule Wallet do
 
   # Poll a node process for the latest blocks in the blockchain
   defp poll_for_blocks(state) do
-    send(state.node, {:get_blocks, self(), state.scanned_height})
+    BlockchainNode.get_new_blocks(state.node, state.scanned_height)
     receive do
       {:new_blocks, blocks} ->
+        IO.puts("RECEIVED NEW BLOCKS")
         Enum.reduce(blocks, state, fn block, state ->
-          state = %{state | scanned_height: block.index}
+          state = %{state | scanned_height: block.height}
           cond do
-            Map.has_key?(state.pending, block.index) ->  # for sent transactions...
-              %{
-                state |
-                past_transactions: Map.put(state.past_transactions, block.index, block.transaction),
+            Map.has_key?(state.pending, block.height) ->  # for sent transactions...
+              %{state |
+                past_transactions: Map.put(state.past_transactions, block.height, block.transaction),
                 pending: Map.delete(state.pending, block.txid)
               }
 
             owned_address(state, block.transaction.outputs) -> # for received transaction...
               available_utxo = for {addr, amount} <- block.transaction.outputs,
                                 do: Map.put(state.available_utxo, {amount, block.txid}, addr) #TODO: might be wrong
-              %{
-                state |
-                past_transactions: Map.put(state.past_transactions, block.index, block.transaction),
+              %{state |
+                past_transactions: Map.put(state.past_transactions, block.height, block.transaction),
                 balance: state.balance + block.transaction.amount,
-                available_utxo: available_utxo,
+                available_UTXOs: available_utxo,
                 pending: Map.delete(state.pending, block.txid)
               }
 
@@ -182,10 +202,8 @@ defmodule Wallet do
           end)
 
       {:up_to_date} -> state
-
-      _ -> state
     after
-      100 -> :timeout
+      100 -> state
     end
   end
 end
