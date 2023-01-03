@@ -1,7 +1,7 @@
 IEx.Helpers.c "best_effort_broadcast.ex", "."
 IEx.Helpers.c "paxos.ex", "."
-IEx.Helpers.c "../confidential_utxo/wallet.ex", "."
-IEx.Helpers.c "../confidential_utxo/node.ex", "."
+IEx.Helpers.c "wallet.ex", "."
+IEx.Helpers.c "node.ex", "."
 
 defmodule Master do
   def start(n \\ 5) do
@@ -23,14 +23,11 @@ defmodule Master do
     alice = Wallet.generate_address(Enum.at(wallet_pids, 0))
     bob = Wallet.generate_address(Enum.at(wallet_pids, 1))
 
+    Process.sleep(100) # let the master wallet realise he has control of the genesis amount
+
     # send 20 coins each to alice and bob
     Wallet.send(master_pid, alice, 20)
     Wallet.send(master_pid, bob, 20)
-
-    # TODO: what if a node fails? Alice and Bobs wallets are completely fucked hehe
-    # efd_pids =
-    #   for {p_pid, n_pid} <- {paxos_pids, nodes_pids},
-    #       do: spawn_link(EventualFailureDetector, :init, [p_pid, n_pid])
 
     {nodes_pids, master_pid, wallet_pids}
   end

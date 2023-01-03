@@ -1,3 +1,4 @@
+# iex pow_tests.exs
 defmodule Test do
   def proof_of_work(pid, block) do
     n = :rand.uniform(trunc(:math.pow(2, 32)))

@@ -102,7 +102,7 @@ defmodule Wallet do
 
       _ -> state
 
-      after 1000 -> state
+      after 500 -> state
     end
 
     state = poll_for_blocks(state)
@@ -114,11 +114,11 @@ defmodule Wallet do
   # ======================
   def send(w, address, amount) do
     if amount < 0, do: raise("good one, you can't send negative money")
-    IO.puts("sending #{amount} to #{address}")
+    IO.puts("request to send #{amount} to #{address}")
     send(w, {:spend, self(), address, amount})
     receive do
-      {:ok, msg} -> msg
-      {:error, msg} -> "error: " <> msg
+      {:ok, msg} -> IO.puts(msg)
+      {:error, msg} -> IO.puts("error: " <> msg)
     after
       2000 -> :timeout
     end
@@ -277,9 +277,8 @@ defmodule Wallet do
               # handle outputs
               state = Enum.reduce(outs, state, fn {addr, amount}, state ->
                         %{state | available_UTXOs: Map.put(state.available_UTXOs, {amount, block.transaction.txid}, addr)} end)
-              # handle transaction
 
-              # balance = UTXOs available + owned outputs in pending_txs (future change)
+              # handle transaction
               state = %{state | past_transactions: Map.put(state.past_transactions, block.height, block.transaction),
                                 pending: Map.delete(state.pending, block.transaction.txid)}
 

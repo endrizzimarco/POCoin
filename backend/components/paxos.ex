@@ -164,9 +164,7 @@ defmodule Paxos do
     send(pid, {:get_decision, self(), inst})
     receive do
       {:ok, v} when v != nil -> v
-      {:error, m} ->
-        IO.puts(m)
-        nil
+      {:error, m} -> nil
       true -> nil
     after
       t -> {:timeout}
