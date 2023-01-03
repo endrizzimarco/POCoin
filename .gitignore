@@ -23,7 +23,7 @@ erl_crash.dump
 com3026_summative-*.tar
 
 # Ignore assets that are produced by build tools.
-/priv/static/assets/
+/priv/static/assets/XX
 
 # Ignore digested assets cache.
 /priv/static/cache_manifest.json
@@ -32,3 +32,5 @@ com3026_summative-*.tar
 npm-debug.log
 /assets/node_modules/
 /app/node_modules
+
+**.beam
