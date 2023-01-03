@@ -15,17 +15,17 @@ defmodule Master do
     nodes_pids = for name <- node_names, do: BlockchainNode.start(name, node_names, paxos_names, pub_key)
 
     # master wallet
-    master_pid = spawn(Wallet, :start, [Enum.at(nodes_pids, 0)])
+    master_pid = Wallet.start(String.to_atom("m"), Enum.at(nodes_pids, 0))
     Wallet.add_keypair(master_pid, {pub_key, priv_key})  # provide master with full genesis amount
 
     # generate alice and bob wallets
-    wallet_pids = for x <- (1..2), do: spawn(Wallet, :start, [Enum.at(nodes_pids, x)])
+    wallet_pids = for x <- 1..2, do: Wallet.start(String.to_atom("w#{x}"), Enum.at(nodes_pids, x))
     alice = Wallet.generate_address(Enum.at(wallet_pids, 0))
     bob = Wallet.generate_address(Enum.at(wallet_pids, 1))
 
     # send 20 coins each to alice and bob
     Wallet.send(master_pid, alice, 20)
-    Wallet.send(master_pid, bob, 20)
+    # Wallet.send(master_pid, bob, 20) TODO:
 
     # TODO: what if a node fails? Alice and Bobs wallets are completely fucked hehe
     # efd_pids =
@@ -43,5 +43,5 @@ end
 {nodes_pids, master_pid, wallet_pids} = Master.start()
 IO.puts("master_pid: #{inspect master_pid}")
 IO.puts("wallet_pids: #{inspect wallet_pids}")
-IO.puts(inspect nodes_pids)
+IO.puts("nodes_pids: #{inspect nodes_pids}")
 # master_pid |> Wallet.balance()

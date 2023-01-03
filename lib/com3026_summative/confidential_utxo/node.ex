@@ -37,7 +37,7 @@ defmodule BlockchainNode do
       pax_pid: paxos_pid,
       # == blockchain state ==
       height: 1, # height of the blockchain and paxos instance
-      blockchain: [%{height: 1, timestamp: 0, txid: "genesis", transaction: %{outputs: [{derive_address(gen_pub_key),  total_supply}]}}],
+      blockchain: [%{height: 1, timestamp: 0, transaction: %{txid: "genesis", outputs: [{derive_address(gen_pub_key),  total_supply}]}}],
       pending_transactions: %{}, # %{txid => tx}
       unspent_UTXO: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
       pow_pids: %{}, # %{block => pid}
@@ -49,9 +49,9 @@ defmodule BlockchainNode do
 
   def run(state) do
     state = receive do
-      {:new_transaction, client, tx, txid} ->
+      {:new_transaction, client, txid, tx} ->
         if verify(state, tx) and not Map.has_key?(state.pending_transactions, txid) do
-          # beb_broadcast(state.nodes, {:verify_transaction, tx, txid}) TODO:
+          beb_broadcast({:verify_transaction, txid, tx}, state.nodes)
           send(client, {:ok, txid})
           state
         else
@@ -59,12 +59,13 @@ defmodule BlockchainNode do
           state
         end
 
-      {:verify_transaction, tx, txid} ->
+      {:verify_transaction, txid, tx} ->
         if verify(state, tx) and not Map.has_key?(state.pending_transactions, txid) do
           state = %{state | pending_transactions: Map.put(state.pending_transactions, txid, tx)}
 
-          block = generate_block(state, tx, txid)
-          pow_pid = Task.async(fn -> proof_of_work(self(), block) end)  # start POW for this block
+          block = generate_block(state, txid, tx)
+          pid = self()
+          pow_pid = Task.async(fn -> proof_of_work(pid, block) end)  # start POW for this block
 
           %{state | pow_pids: Map.put(state.pow_pids, state.height, pow_pid)}
         else
@@ -72,13 +73,16 @@ defmodule BlockchainNode do
         end
 
       {:pow_found, block, n} ->
-        Map.put(block, :nonce, n) # add nonce to the block
-        # start paxos
-        state = poll_for_blocks(state)
-        case Paxos.propose(state.pax_pid, state.height+1, {:block, block}, 1000) do
-          {:decided, _} -> beb_broadcast(state.nodes, {:block_decided})
+        block = Map.put(block, :nonce, n) # add nonce to the block
+        state = poll_for_blocks(state) # make sure to have latest blockchain
+
+        # start SMR
+        case Paxos.propose(state.pax_pid, state.height+1, block, 1000) do
           {:abort} -> IO.puts("another block is being proposed or has already been decdied")
           {:timeout} -> IO.puts("timeout")
+          {:decided, _} ->
+            IO.puts("#{inspect state.name} successfully mined block #{inspect state.height+1}")
+            beb_broadcast({:block_decided}, state.nodes)
         end
         state
 
@@ -128,46 +132,44 @@ defmodule BlockchainNode do
   # ==========================
   defp generate_block(state, txid, transaction) do
     %{
-      height: state.height,
+      height: state.height + 1,
       timestamp: DateTime.utc_now(),
-      txid: txid,
-      transaction: transaction,
-      nonce: 0, # proof of work
-      previous_hash: latest_block_hash(state)
+      transaction: Map.put(transaction, :txid, txid),
+      prev_hash: latest_block_hash(state)
     }
   end
 
   defp latest_block_hash(state) do
-    state.blockchain |> List.last() |> :erlang.term_to_binary() |> :crypto.hash(:sha256) |> Base.encode16()
+    bin = state.blockchain |> List.last() |> :erlang.term_to_binary()
+    :crypto.hash(:sha256, bin) |> Base.encode16()
   end
 
   defp poll_for_blocks(state) do
     case Paxos.get_decision(state.pax_pid, i = state.height + 1, 1000) do
       nil -> state
       {:timeout} -> state
-
       block ->
         state =
           if check_work(block) and block.prev_hash == latest_block_hash(state) do
-            Process.exit(state.pow_pids[block.height], :kill)
+            Task.shutdown(state.pow_pids[state.height], :brutal_kill) # kill POW process for that block
             # add to blockchain, delete pow_pid for that block, increment height and update UTXO
-            %{state | blockchain: state.blockchain ++ [block],
+            state = %{state | blockchain: state.blockchain ++ [block],
                       pow_pids: Map.delete(state.pow_pids, block.height),
                       height: state.height + 1,
                       unspent_UTXO: update_UTXO(state.unspent_UTXO, block)}
+            state
           else
             state
           end
-
         poll_for_blocks(%{state | height: i})
     end
   end
 
-  defp update_UTXO(state, block) do
+  defp update_UTXO(unspent_UTXO, block) do
     input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end)
     outputs = Map.new(block.transaction.outputs, fn {a, v} -> {a, v} end)
     # update UTXO set by removing inputs and adding outputs
-    state.unspent_UTXO |> Map.drop(input_addresses) |> Map.merge(outputs)
+    unspent_UTXO |> Map.drop(input_addresses) |> Map.merge(outputs)
   end
 
   # =======================
@@ -176,18 +178,20 @@ defmodule BlockchainNode do
   defp proof_of_work(pid, block) do
     n = :rand.uniform(trunc(:math.pow(2, 32)))
     cond do
-      String.starts_with?(calculate_pow_hash(block, n), "000") -> send(pid, {:pow_found, block, n})
+      String.starts_with?(calculate_pow_hash(block, n), "000000") -> send(pid, {:pow_found, block, n})
       true -> proof_of_work(pid, block)
     end
   end
 
   defp calculate_pow_hash(block, n) do
-    :erlang.term_to_binary(block) <> :erlang.term_to_binary(n) |> :crypto.hash(:sha256) |> Base.encode16()
+    bin_sum = :erlang.term_to_binary(block) <> :erlang.term_to_binary(n)
+    :crypto.hash(:sha256, bin_sum) |> Base.encode16()
   end
 
-
   defp check_work(block) do
-    calculate_pow_hash(block, block.nonce) |> String.starts_with?("000")
+    nonce = block.nonce
+    block = Map.delete(block, :nonce)
+    calculate_pow_hash(block, nonce) |> String.starts_with?("000000")
   end
 
   # ============================
