@@ -24,3 +24,6 @@ web_server-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Beam artifacts
+**beam

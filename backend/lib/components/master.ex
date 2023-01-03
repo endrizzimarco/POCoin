@@ -1,8 +1,3 @@
-IEx.Helpers.c "best_effort_broadcast.ex", "."
-IEx.Helpers.c "paxos.ex", "."
-IEx.Helpers.c "wallet.ex", "."
-IEx.Helpers.c "node.ex", "."
-
 defmodule Master do
   def start(n \\ 5) do
     paxos_names = get_names(n, "p") # [:p1, :p2, :p3, :p4, :p5]
@@ -36,13 +31,3 @@ defmodule Master do
     Enum.map(1..n, fn x -> String.to_atom("#{id}#{x}") end)
   end
 end
-
-{nodes_pids, master_pid, wallet_pids} = Master.start()
-IO.puts("master_pid: #{inspect master_pid}")
-IO.puts("wallet_pids: #{inspect wallet_pids}")
-IO.puts("nodes_pids: #{inspect nodes_pids}")
-# master_pid |> Wallet.balance()
-
-# :global.whereis_name(:n1) |> BlockchainNode.get_blockchain()
-# :global.whereis_name(:w1) |> Wallet.send(
-# :global.whereis_name(:w1) |> Wallet.balance()
