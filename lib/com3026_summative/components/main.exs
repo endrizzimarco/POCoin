@@ -25,7 +25,7 @@ defmodule Master do
 
     # send 20 coins each to alice and bob
     Wallet.send(master_pid, alice, 20)
-    # Wallet.send(master_pid, bob, 20) TODO:
+    Wallet.send(master_pid, bob, 20)
 
     # TODO: what if a node fails? Alice and Bobs wallets are completely fucked hehe
     # efd_pids =
@@ -45,3 +45,7 @@ IO.puts("master_pid: #{inspect master_pid}")
 IO.puts("wallet_pids: #{inspect wallet_pids}")
 IO.puts("nodes_pids: #{inspect nodes_pids}")
 # master_pid |> Wallet.balance()
+
+# :global.whereis_name(:n1) |> BlockchainNode.get_blockchain()
+# :global.whereis_name(:w1) |> Wallet.send(
+# :global.whereis_name(:w1) |> Wallet.balance()
