@@ -12,7 +12,7 @@ defmodule Master do
     {pub_key, priv_key} = :crypto.generate_key(:ecdh, :secp256k1)
 
     # spawn nodes
-    nodes_pids = for name <- node_names, do: spawn(BlockchainNode, :start, [name, node_names, paxos_names, pub_key])
+    nodes_pids = for name <- node_names, do: BlockchainNode.start(name, node_names, paxos_names, pub_key)
 
     # master wallet
     master_pid = spawn(Wallet, :start, [Enum.at(nodes_pids, 0)])
@@ -41,5 +41,7 @@ defmodule Master do
 end
 
 {nodes_pids, master_pid, wallet_pids} = Master.start()
+IO.puts("master_pid: #{inspect master_pid}")
+IO.puts("wallet_pids: #{inspect wallet_pids}")
 IO.puts(inspect nodes_pids)
 # master_pid |> Wallet.balance()

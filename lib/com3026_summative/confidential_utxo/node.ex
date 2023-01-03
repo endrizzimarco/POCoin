@@ -18,26 +18,28 @@
 defmodule BlockchainNode do
   def start(name, node_names, paxos_names, gen_pub_key) do
     index = name |> to_string() |> String.last() |> String.to_integer()
-    paxos_pid = spawn_link(Paxos, :start, [String.to_atom("p#{index}"), paxos_names])
+    paxos_pid = Paxos.start(String.to_atom("p#{index}"), paxos_names)
     pid = spawn(BlockchainNode, :init, [name, node_names, gen_pub_key, paxos_pid])
 
     pid = case :global.re_register_name(name, pid) do
             :yes -> pid
           end
-    {pid, paxos_pid}
+    pid
   end
 
   def init(name, nodes, gen_pub_key, paxos_pid) do
+    total_supply = 200
+
     state = %{
       # == distributed state ==
       name: name,
       nodes: nodes,
-      paxos_pid: paxos_pid,
+      pax_pid: paxos_pid,
       # == blockchain state ==
       height: 1, # height of the blockchain and paxos instance
-      blockchain: [%{height: 1, timestamp: 0, txid: "genesis", transaction: nil}],
+      blockchain: [%{height: 1, timestamp: 0, txid: "genesis", transaction: %{outputs: [{derive_address(gen_pub_key),  total_supply}]}}],
       pending_transactions: %{}, # %{txid => tx}
-      unspent_UTXO: Map.put(%{}, derive_address(gen_pub_key), 200), # %{address => value}
+      unspent_UTXO: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
       pow_pids: %{}, # %{block => pid}
     }
     start_beb(name)
@@ -49,7 +51,7 @@ defmodule BlockchainNode do
     state = receive do
       {:new_transaction, client, tx, txid} ->
         if verify(state, tx) and not Map.has_key?(state.pending_transactions, txid) do
-          beb_broadcast(state.nodes, {:verify_transaction, tx, txid})
+          # beb_broadcast(state.nodes, {:verify_transaction, tx, txid}) TODO:
           send(client, {:ok, txid})
           state
         else
@@ -73,7 +75,7 @@ defmodule BlockchainNode do
         Map.put(block, :nonce, n) # add nonce to the block
         # start paxos
         state = poll_for_blocks(state)
-        case Paxos.propose(state.paxos_pid, state.height+1, {:block, block}, 1000) do
+        case Paxos.propose(state.pax_pid, state.height+1, {:block, block}, 1000) do
           {:decided, _} -> beb_broadcast(state.nodes, {:block_decided})
           {:abort} -> IO.puts("another block is being proposed or has already been decdied")
           {:timeout} -> IO.puts("timeout")
@@ -84,7 +86,6 @@ defmodule BlockchainNode do
 
       # return blocks in the blockchain with height > input
       {:get_new_blocks, client, height} ->
-        IO.puts("HELLO??")
         state = poll_for_blocks(state)
         send(client, {:new_blocks, Enum.drop(state.blockchain, height)})
         state
@@ -95,12 +96,8 @@ defmodule BlockchainNode do
         send(client, {:blockchain, state.blockchain})
         state
 
-      x ->
-        IO.puts("WHYYYYY #{inspect x}")
-        state
+      _ -> state
     end
-
-    IO.puts("OIWQEJOIWQHJEOIHWEOIQWH")
     run(state)
   end
 
@@ -108,17 +105,10 @@ defmodule BlockchainNode do
   # ------ Public API  ------
   # =========================
   def get_new_blocks(node, height) do
-    IO.puts("#{inspect node}, #{inspect height}")
-    IO.puts("#{inspect is_pid(node)}")
     send(node, {:get_new_blocks, self(), height})
-    # IO.puts("#{inspect a}")
     receive do
-      {:new_blocks, [h | t]}  ->
-        IO.puts("AAAAAAAAAAAAA")
-        {:new_blocks, [h | t]}
-      {:new_blocks, []} ->
-        IO.puts("BBBBBBBBBBBBB")
-        {:up_to_date}
+      {:new_blocks, [h | t]}  -> [h | t]
+      {:new_blocks, []} -> {:up_to_date}
     after
       1000 -> :timeout
     end
@@ -153,8 +143,8 @@ defmodule BlockchainNode do
 
   defp poll_for_blocks(state) do
     case Paxos.get_decision(state.pax_pid, i = state.height + 1, 1000) do
-      nil ->
-        state
+      nil -> state
+      {:timeout} -> state
 
       block ->
         state =
@@ -220,13 +210,13 @@ defmodule BlockchainNode do
 
   # check if all signatures of a transaction are valid
   defp sigs_valid(tx) do
-    checked_sigs = Enum.map(tx.sigs, fn sig -> check_sig_against_inputs(tx, sig) end)
+    checked_sigs = Enum.map(tx.signatures, fn sig -> check_sig_against_inputs(tx, sig) end)
     Enum.all?(checked_sigs, fn x -> x end)
   end
 
   # check a single signature against all inputs of a transaction
   defp check_sig_against_inputs(tx, sig) do
-    Enum.any?(tx.inputs, fn pub_key -> verify_sig(tx, pub_key, sig) end)
+    Enum.any?(tx.inputs, fn pub_key -> verify_sig(Map.delete(tx, :signatures), pub_key, sig) end)
   end
 
   # verify a single signature against a single public key
