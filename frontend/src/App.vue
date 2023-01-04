@@ -1,14 +1,20 @@
 <script setup>
 import HelloWorld from './components/HelloWorld.vue';
 import TheWelcome from './components/TheWelcome.vue';
+import axios from 'axios';
+
+const testMethod = async () => {
+  const response = await (await axios.get('http://localhost:3000/balance?wallet=w1')).data;
+  console.log(response);
+};
 </script>
 
 <template lang="pug">
 header
-  img(alt="Vue logo" class="logo" src="./assets/logo.svg" width="125" height="125")
-  a-button.bg-red-600(type="primary") Test
+  img.logo(alt='Vue logo', src='./assets/logo.svg', width='125', height='125')
+  a-button.bg-red-600(type='primary', @click='testMethod') Test
   .wrapper
-    HelloWorld(msg="You did it!")
+    HelloWorld(msg='You did it!')
 main
   TheWelcome
 </template>
