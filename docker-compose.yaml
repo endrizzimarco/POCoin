@@ -1,0 +1,9 @@
+services:
+  frontend:
+    image: endrizzimarco/com3026-frontend
+    ports:
+      - "8080:8080"
+  backend:
+    image: endrizzimarco/com3026-backend
+    ports:
+      - "3000:3000"
