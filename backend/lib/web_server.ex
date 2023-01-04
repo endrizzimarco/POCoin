@@ -7,25 +7,49 @@ defmodule WebServer do
 
   def call(conn, pids) do
     {nodes_pids, master_pid, wallet_pids} = pids
+    params = Plug.Conn.fetch_query_params(conn).query_params
 
     case conn.path_info do
+      # ======================
+      # ----- Wallet API -----
+      # ======================
       ["balance"] ->
-        params = Plug.Conn.fetch_query_params(conn).query_params
-        response(conn, Wallet.balance(get_pid(params["wallet"])))
+        response(conn, params["wallet"] |> get_pid |> Wallet.balance())
+
+      ["available_balance"] ->
+        response(conn, params["wallet"] |> get_pid |> Wallet.available_balance())
 
       ["send"] ->
-        params = Plug.Conn.fetch_query_params(conn).query_params
         wallet = get_pid(params["wallet"])
         to_addr = params["to"]
         amount = elem(Float.parse(params["amount"]), 0)
         response(conn, Wallet.send(wallet, to_addr, amount))
 
-      ["world"] ->
-        response(conn, "lol")
+      ["generate_address"] ->
+        response(conn, params["wallet"] |> get_pid |> Wallet.generate_address())
+
+      ["addresses"] ->
+        response(conn, params["wallet"] |> get_pid |> Wallet.addresses())
+
+      ["available_utxos"] ->
+        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos() |> detuple())
+
+      ["history"] ->
+        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos() |> detuple())
+
+      # ======================
+      # ------ Node API ------
+      # ======================
+      ["blockchain"] ->
+        response(conn, params["node"] |> get_pid |> BlockchainNode.get_blockchain() |> detuple())
 
       _ ->
-        response(conn, "not found")
+        response(conn, "endpoint not found -> #{conn.path_info}")
     end
+  end
+
+  def detuple(data) do
+    data = if is_tuple(data), do: Tuple.to_list(data), else: data
   end
 
   def response(conn, data) do

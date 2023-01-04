@@ -1,38 +1,32 @@
-@import './base.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-
-  font-weight: normal;
+  font-family: -apple-system, BlinkMacSystemFont, Inter, 'Helvetica Neue', 'Segoe UI', Roboto, Oxygen, Avenir, Ubuntu,
+    Cantarell, 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #2c3e50;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoosthing: grayscale;
 }
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  position: relative;
 }
 
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
+/* make content fill all available height */
+.ant-layout-content {
+  min-height: calc(100vh - 3rem) !important;
 }
 
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
+/* Make the antd card tabs stick to the below container */
+.ant-tabs-top > .ant-tabs-nav {
+  margin-bottom: 0 !important;
 }

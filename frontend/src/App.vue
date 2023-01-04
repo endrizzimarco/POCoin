@@ -1,49 +1,20 @@
 <script setup>
-import HelloWorld from './components/HelloWorld.vue';
-import TheWelcome from './components/TheWelcome.vue';
-import axios from 'axios';
-
-const testMethod = async () => {
-  const response = await (await axios.get('http://localhost:3000/balance?wallet=w1')).data;
-  console.log(response);
-};
+import Header from '@/components/layout/PageHeader.vue'
+import NodeView from '@/components/layout/NodeView.vue'
+import BlockchainView from '@/components/layout/BlockchainView.vue'
+import WalletView from '@/components/layout/WalletView.vue'
 </script>
 
 <template lang="pug">
-header
-  img.logo(alt='Vue logo', src='./assets/logo.svg', width='125', height='125')
-  a-button.bg-red-600(type='primary', @click='testMethod') Test
-  .wrapper
-    HelloWorld(msg='You did it!')
-main
-  TheWelcome
+a-layout-header.flex.px-4.h-12.sticky.top-0.z-50
+  Header
+a-layout
+  a-layout-content.p-5
+    a-row
+      a-col.border-2.border-black(:span='8')
+        WalletView
+      a-col.border-2.border-black(:span='8')
+        BlockchainView
+      a-col.border-2.border-black(:span='8')
+        NodeView
 </template>
-
-<style scoped>
-header {
-  line-height: 1.5;
-}
-
-.logo {
-  display: block;
-  margin: 0 auto 2rem;
-}
-
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
-  }
-
-  .logo {
-    margin: 0 2rem 0 0;
-  }
-
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
-  }
-}
-</style>
