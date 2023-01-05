@@ -35,7 +35,14 @@ defmodule WebServer do
         response(conn, params["wallet"] |> get_pid |> Wallet.generate_address())
 
       ["addresses"] ->
-        response(conn, params["wallet"] |> get_pid |> Wallet.addresses())
+        data = params["wallet"] |> get_pid |> Wallet.addresses()
+
+        encoded =
+          Enum.map(data, fn {addr, {pub, priv}} ->
+            Map.put(%{}, addr, {Base.encode64(pub), Base.encode64(priv)})
+          end)
+
+        response(conn, encoded)
 
       ["available_utxos"] ->
         response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos())
@@ -47,18 +54,26 @@ defmodule WebServer do
       # ------ Node API ------
       # ======================
       ["blockchain"] ->
-        data = params["node"] |> get_pid |> BlockchainNode.get_blockchain()
+        node = params["node"] |> get_pid
+        height = params["height"] |> String.to_integer()
+        data = BlockchainNode.get_new_blocks(node, height)
 
-        data =
-          Enum.map(data, fn block ->
-            Map.put(block, :transaction, %{
-              block.transaction
-              | inputs: encode_64(block.transaction.inputs),
-                signatures: encode_64(block.transaction.signatures)
-            })
-          end)
+        if data != :up_to_date do
+          data =
+            Enum.map(data, fn block ->
+              Map.put(block, :transaction, %{
+                block.transaction
+                | inputs: encode_64(block.transaction.inputs),
+                  signatures: encode_64(block.transaction.signatures)
+              })
+            end)
+          response(conn, data)
+        else
+          response(conn, data)
+        end
 
-        response(conn, data)
+      ["mempool"] ->
+        response(conn, params["node"] |> get_pid |> BlockchainNode.get_mempool())
 
       _ ->
         response(conn, "endpoint not found -> #{conn.path_info}")

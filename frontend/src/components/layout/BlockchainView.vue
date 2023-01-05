@@ -1,11 +1,17 @@
 <script setup>
+import { ref, onMounted } from 'vue'
+import { message } from 'ant-design-vue'
 import axios from 'axios'
-import { ref, onMounted, computed } from 'vue'
 
 const blockchain = ref([])
+var scanned_height = 0
 
 const poll_blockchain = async () => {
-  blockchain.value = await (await axios.get('http://localhost:3000/blockchain?node=n1')).data
+  const r = await (await axios.get(`http://localhost:3000/blockchain?node=n1&height=${scanned_height}`)).data
+  if (r == 'up_to_date') return
+  if (r.length == 1) message.success(`New block mined by ${r[0].miner}`)
+  blockchain.value = blockchain.value.concat(r)
+  scanned_height += r.length
 }
 
 onMounted(() => {

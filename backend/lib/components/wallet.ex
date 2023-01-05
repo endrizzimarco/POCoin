@@ -63,8 +63,6 @@ defmodule Wallet do
 
           # update state for new transaction
           addresses = if change_addr != nil, do: Map.put(state.addresses, change_addr, keypair), else: state.addresses
-          IO.puts(inspect from_addrs)
-          IO.puts(inspect Map.drop(state.available_UTXOs, [from_addrs]))
           # Enum.map(from_addrs, fn addr -> String.to_atom(addr) end)
           %{state | pending: Map.put(state.pending, txid, transaction),
                     available_UTXOs: Map.drop(state.available_UTXOs, from_addrs),
@@ -92,7 +90,7 @@ defmodule Wallet do
         state
 
       {:get_addresses, client} ->
-        send(client, {:addresses, Enum.map(state.addresses, fn {addr, _} -> addr end)})
+        send(client, {:addresses, Map.to_list(state.addresses)})
         state
 
       {:get_utxos, client} ->
@@ -303,7 +301,7 @@ defmodule Wallet do
           end
         end)
 
-      {:up_to_date} -> state
+      :up_to_date -> state
 
       _ -> state
     end
