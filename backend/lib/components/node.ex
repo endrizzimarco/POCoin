@@ -29,6 +29,7 @@ defmodule BlockchainNode do
 
   def init(name, nodes, gen_pub_key, paxos_pid) do
     total_supply = 200
+    genesis_transaction = %{txid: "genesis", signatures: [], inputs: [], outputs: [{derive_address(gen_pub_key),  total_supply}]}
 
     state = %{
       # == distributed state ==
@@ -37,10 +38,11 @@ defmodule BlockchainNode do
       pax_pid: paxos_pid,
       # == blockchain state ==
       height: 1, # height of the blockchain and paxos instance
-      blockchain: [%{height: 1, timestamp: 0, transaction: %{txid: "genesis", outputs: [{derive_address(gen_pub_key),  total_supply}]}}],
-      pending_transactions: %{}, # %{txid => tx}
+      blockchain: [%{height: 1, timestamp: 0, nonce: nil, prev_hash: nil, transaction: genesis_transaction}],
+      mempool: [], # transactions that have been received but not yet added to the blockchain {txid, tx}
       unspent_UTXO: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
-      pow_pids: %{}, # %{block => pid}
+      pow_pid: nil, # pid of the current POW process
+      working_on: {} # transaction that is currently being worked on
     }
     start_beb(name)
     run(state)
@@ -50,8 +52,8 @@ defmodule BlockchainNode do
   def run(state) do
     state = receive do
       {:new_transaction, client, txid, tx} ->
-        if verify(state, tx) and not Map.has_key?(state.pending_transactions, txid) do
-          beb_broadcast({:verify_transaction, txid, tx}, state.nodes)
+        if verify(state, tx) and not in_mempool(state, txid) do
+          beb_broadcast({:add_transaction, txid, tx}, state.nodes)
           send(client, {:ok, txid})
           state
         else
@@ -59,15 +61,9 @@ defmodule BlockchainNode do
           state
         end
 
-      {:verify_transaction, txid, tx} ->
-        if verify(state, tx) and not Map.has_key?(state.pending_transactions, txid) do
-          state = %{state | pending_transactions: Map.put(state.pending_transactions, txid, tx)}
-
-          block = generate_block(state, txid, tx)
-          pid = self()
-          pow_pid = Task.async(fn -> proof_of_work(pid, block) end)  # start POW for this block
-
-          %{state | pow_pids: Map.put(state.pow_pids, state.height, pow_pid)}
+      {:add_transaction, txid, tx} ->
+        if verify(state, tx) and not in_mempool(state, txid) do
+          %{state | mempool: state.mempool ++ [{txid, tx}]}
         else
           state
         end
@@ -101,8 +97,31 @@ defmodule BlockchainNode do
         state
 
       _ -> state
+
+      after 1000 -> state
     end
+    state = poll_mempool(state)
     run(state)
+  end
+
+  defp in_mempool(mempool, txid) do
+    Enum.any?(mempool, fn {id, _tx} -> id == txid end)
+  end
+
+  defp poll_mempool(state) do
+    if is_nil(state.pow_pid) and not Enum.empty?(state.mempool) do
+      # poll a transaction from mempool
+      [{txid, tx} | lst] = state.mempool
+      state = %{state | mempool: lst}
+
+      # start POW for this block
+      block = generate_block(state, txid, tx)
+      pid = self()
+      pow_pid = Task.async(fn -> proof_of_work(pid, block) end)
+      %{state | pow_pid: pow_pid, working_on: {txid, tx}}
+    else
+      state
+    end
   end
 
   # =========================
@@ -118,6 +137,7 @@ defmodule BlockchainNode do
     end
   end
 
+  #FIXME: returns ok
   def get_blockchain(node) do
     send(node, {:get_blockchain, self()})
     receive do
@@ -133,7 +153,7 @@ defmodule BlockchainNode do
   defp generate_block(state, txid, transaction) do
     %{
       height: state.height + 1,
-      timestamp: DateTime.utc_now(),
+      timestamp: System.os_time(),
       transaction: Map.put(transaction, :txid, txid),
       prev_hash: latest_block_hash(state)
     }
@@ -141,7 +161,7 @@ defmodule BlockchainNode do
 
   defp latest_block_hash(state) do
     bin = state.blockchain |> List.last() |> :erlang.term_to_binary()
-    :crypto.hash(:sha256, bin) |> Base.encode16()
+    :crypto.hash(:sha256, bin) |> Base.encode32()
   end
 
   defp poll_for_blocks(state) do
@@ -151,13 +171,23 @@ defmodule BlockchainNode do
       block ->
         state =
           if check_work(block) and block.prev_hash == latest_block_hash(state) do
-            Task.shutdown(state.pow_pids[state.height], :brutal_kill) # kill POW process for that block
-            # add to blockchain, delete pow_pid for that block, increment height and update UTXO
-            state = %{state | blockchain: state.blockchain ++ [block],
-                      pow_pids: Map.delete(state.pow_pids, block.height),
-                      height: state.height + 1,
-                      unspent_UTXO: update_UTXO(state.unspent_UTXO, block)}
-            state
+            # kill POW for this block height
+            Task.shutdown(state.pow_pid, :brutal_kill)
+
+            # check whether node was working on same tx
+            if {block.transaction, block.transaction.txid} != state.working_on do
+              case in_mempool(state.mempool, block.transaction.txid) do
+                true -> %{state | mempool: Enum.filter(state.mempool, fn {id, _tx} -> id != block.transaction.txid end)}
+                false -> %{state | mempool: [state.working_on] ++ state.mempool}
+              end
+            end
+
+            %{state |
+                blockchain: state.blockchain ++ [block],
+                pow_pid: nil,
+                working_on: nil,
+                height: state.height + 1,
+                unspent_UTXO: update_UTXO(state.unspent_UTXO, block)}
           else
             state
           end
