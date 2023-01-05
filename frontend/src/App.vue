@@ -11,10 +11,10 @@ a-layout-header.flex.px-4.h-12.sticky.top-0.z-50
 a-layout
   a-layout-content.p-5
     a-row
-      a-col.border-2.border-black(:span='8')
+      a-col(:span='8')
         WalletView
-      a-col.border-2.border-black(:span='8')
+      a-col(:span='8')
         BlockchainView
-      a-col.border-2.border-black(:span='8')
+      a-col(:span='8')
         NodeView
 </template>

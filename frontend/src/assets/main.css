@@ -26,7 +26,18 @@
   min-height: calc(100vh - 3rem) !important;
 }
 
-/* Make the antd card tabs stick to the below container */
+/* Make the antd card tabs stick to the below
+ container */
 .ant-tabs-top > .ant-tabs-nav {
   margin-bottom: 0 !important;
+}
+
+/* hack to stop flickering during css animations */
+body {
+  overflow-y: hidden;
+}
+
+/* Common fix */
+.anticon svg {
+  margin-bottom: 4px;
 }
