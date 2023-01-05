@@ -137,11 +137,10 @@ defmodule BlockchainNode do
     end
   end
 
-  #FIXME: returns ok
   def get_blockchain(node) do
     send(node, {:get_blockchain, self()})
     receive do
-      {:blockchain, blockchain} -> {:ok, blockchain}
+      {:blockchain, blockchain} -> blockchain
     after
       1000 -> :timeout
     end

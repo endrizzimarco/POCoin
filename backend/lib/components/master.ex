@@ -15,7 +15,7 @@ defmodule Master do
 
     # generate alice, bob and charlie's wallets
     wallet_pids = for x <- 1..3, do: Wallet.start(String.to_atom("w#{x}"), Enum.at(nodes_pids, x))
-    [alice, bob, charlie] = for w <- wallet_pids, do: Wallet.generate_address(w)
+    [alice, bob, _charlie] = for w <- wallet_pids, do: Wallet.generate_address(w)
 
     Process.sleep(100) # let the master wallet realise he has control of the genesis amount
 

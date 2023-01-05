@@ -50,7 +50,7 @@ defmodule WebServer do
         data = params["node"] |> get_pid |> BlockchainNode.get_blockchain()
 
         data =
-          Enum.map(elem(data, 1), fn block ->
+          Enum.map(data, fn block ->
             Map.put(block, :transaction, %{
               block.transaction
               | inputs: encode_64(block.transaction.inputs),
