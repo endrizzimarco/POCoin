@@ -1,6 +1,12 @@
 defmodule WebServer do
   import Plug.Conn
 
+  defimpl Jason.Encoder, for: Tuple do
+    def encode(data, opts) when is_tuple(data) do
+      Jason.Encode.list(Tuple.to_list(data), opts)
+    end
+  end
+
   def init(options) do
     {nodes_pids, master_pid, wallet_pids} = Master.start()
   end
@@ -32,24 +38,31 @@ defmodule WebServer do
         response(conn, params["wallet"] |> get_pid |> Wallet.addresses())
 
       ["available_utxos"] ->
-        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos() |> detuple())
+        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos())
 
       ["history"] ->
-        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos() |> detuple())
+        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos())
 
       # ======================
       # ------ Node API ------
       # ======================
       ["blockchain"] ->
-        response(conn, params["node"] |> get_pid |> BlockchainNode.get_blockchain() |> detuple())
+        data = params["node"] |> get_pid |> BlockchainNode.get_blockchain()
+
+        data =
+          Enum.map(elem(data, 1), fn block ->
+            Map.put(block, :transaction, %{
+              block.transaction
+              | inputs: encode_64(block.transaction.inputs),
+                signatures: encode_64(block.transaction.signatures)
+            })
+          end)
+
+        response(conn, data)
 
       _ ->
         response(conn, "endpoint not found -> #{conn.path_info}")
     end
-  end
-
-  def detuple(data) do
-    data = if is_tuple(data), do: Tuple.to_list(data), else: data
   end
 
   def response(conn, data) do
@@ -61,5 +74,9 @@ defmodule WebServer do
 
   defp get_pid(name) do
     :global.whereis_name(String.to_atom(name))
+  end
+
+  defp encode_64(lst) do
+    Enum.map(lst, fn x -> Base.encode64(x) end)
   end
 end
