@@ -1,23 +1,17 @@
 <script setup>
 import WalletSendForm from '@/components/WalletSendForm.vue'
-import { defineProps, reactive, onMounted, onUnmounted } from 'vue'
-import axios from 'axios'
+import { defineProps, onMounted, computed } from 'vue'
+import { useWalletStore } from '@/stores/wallets'
 import { message } from 'ant-design-vue'
-
-var timer = null
-var loading = true
+import axios from 'axios'
 
 const props = defineProps({
   wallet: String
 })
 
-const state = reactive({
-  scanned_blockchain_height: 0,
-  total_balance: 0,
-  available_balance: 0,
-  addresses: [],
-  available_utxos: []
-})
+const store = useWalletStore()
+const state = computed(() => store.wallet[props.wallet])
+
 const tableCols = [
   {
     title: 'Address',
@@ -33,46 +27,6 @@ const tableCols = [
   }
 ]
 
-const transform_utxos = utxos => {
-  const transformed = []
-  for (const utxo of utxos) {
-    if (transformed.includes(x => x.address === utxo[0])) {
-      transformed[transformed.findIndex(x => x.address === utxo[0])].balance += utxo[1].toFixed(2)
-    } else {
-      transformed.push({
-        address: utxo[0],
-        balance: utxo[1].toFixed(2)
-      })
-    }
-  }
-  return transformed
-}
-
-const getWalletStats = async () => {
-  const endpoints = [
-    'http://localhost:3000/balance',
-    'http://localhost:3000/available_balance',
-    'http://localhost:3000/addresses',
-    'http://localhost:3000/available_utxos'
-  ]
-
-  const responses = await axios.all(
-    endpoints.map(endpoint =>
-      axios.get(endpoint, {
-        params: {
-          wallet: props.wallet
-        }
-      })
-    )
-  )
-  state.total_balance = responses[0].data
-  state.available_balance = responses[1].data
-  state.addresses = responses[2].data
-  state.available_utxos = transform_utxos(responses[3].data)
-  loading = false
-  timer = setTimeout(getWalletStats, 1000)
-}
-
 const generateAddress = async () => {
   const response = await axios.get('http://localhost:3000/generate_address', {
     params: {
@@ -82,32 +36,31 @@ const generateAddress = async () => {
   response.status === 200
     ? message.success('Successfully generated address')
     : message.error('Failed to generate address')
+
+  console.log('addresses', store.addresses[0])
 }
 
-onMounted(async () => {
-  console.log('mounted' + props.wallet)
-  await getWalletStats()
-})
-
-onUnmounted(() => {
-  console.log('unmounted' + props.wallet)
-  clearTimeout(timer)
+onMounted(() => {
+  store.getWalletStats(props.wallet)
 })
 </script>
 
 <template lang="pug">
-a-skeleton(active, v-if='loading')
 a-row
   a-col(:span='12')
     a-statistic(title='Total Balance', :precision=2, :value='state.total_balance')
   a-col(:span='12')
     a-statistic(title='Available Balance', :precision=2, :value='state.available_balance')
 .mt-5
-  p.pb-3(style='color: #8fb7df') Available UTXOs
-  a-table(:columns='tableCols', :data-source='state.available_utxos', bordered, size='small', :pagination='false')
+  p.pb-3.opacity-50(style='font-weight: 420') Available UTXOs
+  a-table(:columns='tableCols', :data-source='state.available_utxos', size='small', :pagination='false')
     template(#bodycell='{ column, text }')
       template(v-if='column.dataIndex === "name"')
         a {{ text }}
-WalletSendForm.mt-5(:available_balance='state.available_balance')
-a-button.mt-5(@click='generateAddress') Generate Address
+    template(#expandedRowRender)
+      p Public and private keys go here
+p.pt-6.opacity-50(style='font-weight: 420') Generate Address
+a-button.mt-2(@click='generateAddress') Generate Address
+p.pt-6.opacity-50(style='font-weight: 420') Send coins
+WalletSendForm.mt-2(:available_balance='state.available_balance')
 </template>

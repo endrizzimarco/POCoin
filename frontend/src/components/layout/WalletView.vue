@@ -1,15 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { useWalletStore } from '@/stores/wallets'
 import WalletStats from '@/components/WalletStats.vue'
+import { ref } from 'vue'
 
 const activeKey = ref('w1')
-const stopPolling = () => this.$emit('stopPolling', activeKey)
-
 const tabList = [
-  {
-    key: 'm',
-    tab: 'Master'
-  },
   {
     key: 'w1',
     tab: 'Alice'
@@ -21,8 +16,18 @@ const tabList = [
   {
     key: 'w3',
     tab: 'Charlie'
+  },
+  {
+    key: 'm',
+    tab: 'Master'
   }
 ]
+
+const tabChange = key => {
+  useWalletStore().stopPolling(activeKey.value)
+  useWalletStore().getWalletStats(key)
+  activeKey.value = key
+}
 </script>
 
 <template lang="pug">
@@ -31,8 +36,8 @@ const tabList = [
     title='Wallets',
     :tab-list='tabList',
     :active-tab-key='activeKey',
-    @tabChange='key => (activeKey = key)',
-    headStyle='height: 6.1rem;'
+    @tabChange='key => tabChange(key)',
+    :headStyle={ height: '6.1rem' }
   )
     WalletStats(:wallet='activeKey')
 </template>
