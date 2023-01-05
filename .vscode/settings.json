@@ -1,3 +1,4 @@
 {
-  "cSpell.enableFiletypes": ["!elixir", "!vue"]
+  "cSpell.enableFiletypes": ["!elixir", "!vue"],
+  "elixirLS.projectDir": "backend"
 }
