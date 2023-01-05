@@ -17,9 +17,9 @@ defmodule Wallet do
   def init(node) do
     state = %{
       node: node, # pid of the node this wallet communicates with
-      available_UTXOs: %{}, # %{{amount, txid} => address}
-      addresses: %{}, # contains the pub/private keypairs for every address %{address => {pub, priv}}
-      past_transactions: %{}, # %{txid -> tx}
+      available_UTXOs: %{}, # %{address => amount}
+      addresses: %{}, # contains the pub/private keypairs for every address %{address => {{pub, priv}}
+      past_transactions: [], # [{height, type, tx}]
       transaction_pool: [], # list of transactions that need to wait for UTXOs to become available
       pending: %{}, # store transactions until confirmed in the blockchain %{txid => {from, to, amount}}
       scanned_height: 0 # block height of the last block scanned in the blockchain
@@ -31,12 +31,12 @@ defmodule Wallet do
     state = receive do
       {:spend, client, to_addr, amount} ->
         # select UTXOs to spend and generate a change address
-        {utxo_keys, from_addrs, change} = select_utxos(state, amount)
+        {from_addrs, change} = select_utxos(state, amount)
 
         if change < 0 do
           cond do
             waiting_for_pending_utxos(state, amount) ->
-              send(client, {:error, "waiting for utxos to confirm, added to transaction pool"})
+              send(client, {:ok, "added to pending wallet transactions (waiting for other UTXOs to confirm)"})
               %{state | transaction_pool: state.transaction_pool ++ [{client, to_addr, amount}]}
             true ->
               send(client, {:error, "not enough funds"})
@@ -63,8 +63,11 @@ defmodule Wallet do
 
           # update state for new transaction
           addresses = if change_addr != nil, do: Map.put(state.addresses, change_addr, keypair), else: state.addresses
+          IO.puts(inspect from_addrs)
+          IO.puts(inspect Map.drop(state.available_UTXOs, [from_addrs]))
+          # Enum.map(from_addrs, fn addr -> String.to_atom(addr) end)
           %{state | pending: Map.put(state.pending, txid, transaction),
-                    available_UTXOs: Map.drop(state.available_UTXOs, [utxo_keys]),
+                    available_UTXOs: Map.drop(state.available_UTXOs, from_addrs),
                     addresses: addresses}
         end
 
@@ -93,7 +96,7 @@ defmodule Wallet do
         state
 
       {:get_utxos, client} ->
-        send(client, {:utxos, Enum.map(state.available_UTXOs, fn {{key, _}, addr} -> {addr, key} end)})
+        send(client, {:utxos, Map.to_list(state.available_UTXOs)})
         state
 
       {:get_history, client} ->
@@ -117,7 +120,7 @@ defmodule Wallet do
     IO.puts("request to send #{amount} to #{address}")
     send(w, {:spend, self(), address, amount})
     receive do
-      {:ok, msg} -> IO.puts(msg)
+      {:ok, msg} -> IO.puts("ok: " <> msg)
       {:error, msg} -> IO.puts("error: " <> msg)
     after
       2000 -> :timeout
@@ -209,9 +212,10 @@ defmodule Wallet do
 
   # enumerates all UTXOs starting from smallest values until a sum greater than the amount is reached
   defp select_utxos(state, amount) do
-    {utxo_keys, total, addrs} = Enum.reduce_while(state.available_UTXOs, {{}, 0, []}, fn {{val, txid}, addr}, {_, tot, addrs} ->
-      if tot + val < amount, do: {:cont, {{val, txid}, tot+val, addrs ++ [addr]}}, else: {:halt, {{val, txid}, tot+val, addrs ++ [addr]}} end)
-    {utxo_keys, addrs, total-amount}
+    sorted_by_values = state.available_UTXOs |> Map.to_list |> Enum.sort(fn ({_, v1}, {_, v2}) -> v1 <= v2 end)
+    {utxo_keys, total} = Enum.reduce_while(sorted_by_values, {[], 0}, fn {key, val}, {addrs, tot} ->
+      if tot + val < 2, do: {:cont, {addrs ++ [key], tot+val}}, else: {:halt, {addrs ++ [key], tot+val}} end)
+    {utxo_keys, total-amount}
   end
 
   # generates a key pair and its corresponding address
@@ -255,7 +259,7 @@ defmodule Wallet do
   end
 
   defp get_available_balance(state) do
-    Enum.reduce(state.available_UTXOs, 0, fn {{val, _}, _}, sum -> sum + val end)
+    Enum.reduce(state.available_UTXOs, 0, fn {_addr, val}, sum -> sum + val end)
   end
 
   # Poll a node process for the latest blocks in the blockchain
@@ -268,18 +272,24 @@ defmodule Wallet do
           cond do
             Map.has_key?(state.pending, block.height) ->  # for sent transactions...
               %{state |
-                past_transactions: Map.put(state.past_transactions, block.height, block.transaction),
+                past_transactions: state.past_transactions ++ [{block.height, "send", block.transaction}],
                 pending: Map.delete(state.pending, block.transaction.txid)
               }
 
             owned_outputs(state, block.transaction.outputs) -> # for received transaction...
               outs = owned_outputs(state, block.transaction.outputs)
+
               # handle outputs
               state = Enum.reduce(outs, state, fn {addr, amount}, state ->
-                        %{state | available_UTXOs: Map.put(state.available_UTXOs, {amount, block.transaction.txid}, addr)} end)
+                if Map.has_key?(state.available_UTXOs, addr) do
+                  %{state | available_UTXOs: Map.update!(state.available_UTXOs, addr, fn val -> val+amount end)}
+                else
+                  %{state | available_UTXOs: Map.put(state.available_UTXOs, addr, amount)}
+                end
+              end)
 
               # handle transaction
-              state = %{state | past_transactions: Map.put(state.past_transactions, block.height, block.transaction),
+              state = %{state | past_transactions: state.past_transactions ++ [{block.height, "receive", block.transaction}],
                                 pending: Map.delete(state.pending, block.transaction.txid)}
 
               # deliver the transactions in txpool (if possible, else put them at the back of the queue)

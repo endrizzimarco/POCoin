@@ -48,30 +48,6 @@ const transform_utxos = utxos => {
   return transformed
 }
 
-// const transform_utxos = utxos => {
-//   const map = new Map()
-//   for (const utxo of utxos) {
-//     if (map.has(utxo[0])) {
-//       map.set(utxo[0], Number(map.get(utxo[0])) + Number(utxo[1]))
-//     } else {
-//       map.set(utxo[0], utxo[1].toFixed(2))
-//     }
-//     // if (transformed.includes(x => x.address === utxo[0])) {
-//     //   transformed[transformed.findIndex(x => x.address === utxo[0])].balance += utxo[1].toFixed(2)
-//     // } else {
-//     //   transformed.push({
-//     //     address: utxo[0],
-//     //     balance: utxo[1].toFixed(2)
-//     //   })
-//     // }
-//   }
-//   const array = Array.from(map, ([address, balance]) => ({
-//     address: address,
-//     balance: balance.toFixed(2)
-//   }))
-//   return array
-// }
-
 const getWalletStats = async () => {
   const endpoints = [
     'http://localhost:3000/balance',
@@ -95,7 +71,6 @@ const getWalletStats = async () => {
   state.available_utxos = transform_utxos(responses[3].data)
   loading = false
   timer = setTimeout(getWalletStats, 1000)
-  // console.log(props.wallet)
 }
 
 const generateAddress = async () => {
