@@ -7,12 +7,11 @@ defmodule WebServer do
     end
   end
 
-  def init(options) do
-    {nodes_pids, master_pid, wallet_pids} = Master.start()
+  def init(_options) do
+    Master.start()
   end
 
-  def call(conn, pids) do
-    {nodes_pids, master_pid, wallet_pids} = pids
+  def call(conn, _options) do
     params = Plug.Conn.fetch_query_params(conn).query_params
 
     case conn.path_info do
@@ -48,7 +47,10 @@ defmodule WebServer do
         response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos())
 
       ["history"] ->
-        response(conn, params["wallet"] |> get_pid |> Wallet.available_utxos())
+        data = params["wallet"] |> get_pid |> Wallet.history()
+        data = Enum.map(data, fn {height, type, tx} -> {height, type, tx.txid, elem(Enum.at(tx.outputs, 0),1)} end)
+        response(conn, data)
+
 
       # ======================
       # ------ Node API ------
@@ -74,6 +76,12 @@ defmodule WebServer do
 
       ["mempool"] ->
         response(conn, params["node"] |> get_pid |> BlockchainNode.get_mempool())
+
+      ["node_utxos"] ->
+        response(conn, params["node"] |> get_pid |> BlockchainNode.get_utxos())
+
+      ["working_on"] ->
+        response(conn, params["node"] |> get_pid |> BlockchainNode.get_working_on())
 
       _ ->
         response(conn, "endpoint not found -> #{conn.path_info}")

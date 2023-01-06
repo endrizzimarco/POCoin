@@ -29,7 +29,7 @@ defmodule BlockchainNode do
 
   def init(name, nodes, gen_pub_key, paxos_pid) do
     total_supply = 200
-    genesis_transaction = %{txid: "genesis", signatures: [], inputs: [], outputs: [{derive_address(gen_pub_key),  total_supply}]}
+    genesis_transaction = %{txid: "genesis", signatures: [], inputs: [], outputs: [{derive_address(gen_pub_key), total_supply}]}
 
     state = %{
       # == distributed state ==
@@ -38,11 +38,12 @@ defmodule BlockchainNode do
       pax_pid: paxos_pid,
       # == blockchain state ==
       height: 1, # height of the blockchain and paxos instance
-      blockchain: [%{height: 1, timestamp: 0, nonce: nil, prev_hash: nil, transaction: genesis_transaction}],
-      mempool: [], # transactions that have been received but not yet added to the blockchain {txid, tx}
-      unspent_UTXO: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
+      blockchain: [%{height: 1, timestamp: 0, miner: nil, nonce: nil, prev_hash: nil, transaction: genesis_transaction}],
+      mempool: [], # transactions that have been received but not yet added to the blockchain [{txid, tx}]
+      utxos: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
       pow_pid: nil, # pid of the current POW process
-      working_on: {} # transaction that is currently being worked on
+      working_on: {}, # transaction that is currently being worked on
+      found_pow: [], # keep track of which node found the pow for a block
     }
     start_beb(name)
     run(state)
@@ -69,7 +70,7 @@ defmodule BlockchainNode do
         end
 
       {:pow_found, block, n} ->
-        block = Map.put(block, :nonce, n) # add nonce to the block
+        block = Map.put(block, :nonce, n) |> Map.put(:miner, state.name) # add nonce and miner to the block
         state = poll_for_blocks(state) # make sure to have latest blockchain
 
         # start SMR
@@ -94,6 +95,19 @@ defmodule BlockchainNode do
       {:get_blockchain, client} ->
         state = poll_for_blocks(state)
         send(client, {:blockchain, state.blockchain})
+        state
+
+      {:get_mempool, client} ->
+        send(client, {:mempool, state.mempool})
+        state
+
+      {:get_utxos, client} ->
+        send(client, {:utxos, state.utxos})
+        state
+
+      {:get_working_on, client} ->
+        {tx, _} = state.working_on
+        send(client, {:working_on, [tx, state.height]})
         state
 
       _ -> state
@@ -131,7 +145,7 @@ defmodule BlockchainNode do
     send(node, {:get_new_blocks, self(), height})
     receive do
       {:new_blocks, [h | t]}  -> [h | t]
-      {:new_blocks, []} -> {:up_to_date}
+      {:new_blocks, []} -> :up_to_date
     after
       1000 -> :timeout
     end
@@ -142,6 +156,33 @@ defmodule BlockchainNode do
     receive do
       {:blockchain, blockchain} -> blockchain
     after
+      1000 -> :timeout
+    end
+  end
+
+  def get_mempool(node) do
+    send(node, {:get_mempool, self()})
+    receive do
+      {:mempool, mempool} -> mempool
+      after
+      1000 -> :timeout
+    end
+  end
+
+    def get_utxos(node) do
+    send(node, {:get_utxos, self()})
+    receive do
+      {:utxos, utxos} -> utxos
+      after
+      1000 -> :timeout
+    end
+  end
+
+  def get_working_on(node) do
+    send(node, {:get_working_on, self()})
+    receive do
+      {:working_on, data} -> data
+      after
       1000 -> :timeout
     end
   end
@@ -171,7 +212,9 @@ defmodule BlockchainNode do
         state =
           if check_work(block) and block.prev_hash == latest_block_hash(state) do
             # kill POW for this block height
-            Task.shutdown(state.pow_pid, :brutal_kill)
+            if not is_nil(state.pow_pid) do
+              Task.shutdown(state.pow_pid, :brutal_kill)
+            end
 
             # check whether node was working on same tx
             if {block.transaction, block.transaction.txid} != state.working_on do
@@ -186,7 +229,7 @@ defmodule BlockchainNode do
                 pow_pid: nil,
                 working_on: nil,
                 height: state.height + 1,
-                unspent_UTXO: update_UTXO(state.unspent_UTXO, block)}
+                utxos: update_UTXO(state.utxos, block)}
           else
             state
           end
@@ -194,11 +237,11 @@ defmodule BlockchainNode do
     end
   end
 
-  defp update_UTXO(unspent_UTXO, block) do
+  defp update_UTXO(utxos, block) do
     input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end)
     outputs = Map.new(block.transaction.outputs, fn {a, v} -> {a, v} end)
     # update UTXO set by removing inputs and adding outputs
-    unspent_UTXO |> Map.drop(input_addresses) |> Map.merge(outputs)
+    utxos |> Map.drop(input_addresses) |> Map.merge(outputs)
   end
 
   # =======================
@@ -219,7 +262,7 @@ defmodule BlockchainNode do
 
   defp check_work(block) do
     nonce = block.nonce
-    block = Map.delete(block, :nonce)
+    block = Map.drop(block, [:nonce, :miner])
     calculate_pow_hash(block, nonce) |> String.starts_with?("000000")
   end
 
@@ -229,10 +272,10 @@ defmodule BlockchainNode do
   defp verify(state, tx) do
     # turn pub keys into addresses
     input_addresses = Enum.map(tx.inputs, fn pub_key -> derive_address(pub_key) end)
-    utxos_unspent = Enum.all?(input_addresses, fn address -> Map.has_key?(state.unspent_UTXO, address) end)
+    utxos_are_unspent = Enum.all?(input_addresses, fn address -> Map.has_key?(state.utxos, address) end)
 
-    if utxos_unspent do
-      sum_of_inputs = Enum.reduce(input_addresses, 0, fn address, acc -> acc + state.unspent_UTXO[address] end)
+    if utxos_are_unspent do
+      sum_of_inputs = Enum.reduce(input_addresses, 0, fn address, acc -> acc + state.utxos[address] end)
       sum_of_outputs = Enum.reduce(tx.outputs, 0, fn {_, amount}, acc -> acc + amount end)
 
       sum_of_inputs >= sum_of_outputs and sigs_valid(tx)
