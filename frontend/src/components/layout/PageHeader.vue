@@ -1,5 +1,5 @@
 <template lang="pug">
-.flex.w-full(style='background-color: #001529')
+.flex.w-full
   .flex.cursor-pointer
     img(alt='logo', src='@/assets/logo.svg', width='35', height='35')
     p.ml-3.mt-2.text-2xl.text-white POCoin
