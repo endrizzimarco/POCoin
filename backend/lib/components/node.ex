@@ -42,7 +42,7 @@ defmodule BlockchainNode do
       mempool: [], # transactions that have been received but not yet added to the blockchain [{txid, tx}]
       utxos: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
       pow_pid: nil, # pid of the current POW process
-      working_on: {}, # transaction that is currently being worked on
+      working_on: {nil, nil}, # transaction that is currently being worked on
       found_pow: [], # keep track of which node found the pow for a block
     }
     start_beb(name)
@@ -98,16 +98,16 @@ defmodule BlockchainNode do
         state
 
       {:get_mempool, client} ->
-        send(client, {:mempool, state.mempool})
+        send(client, {:mempool, Enum.map(state.mempool, fn {id, _tx} -> id end)})
         state
 
       {:get_utxos, client} ->
-        send(client, {:utxos, state.utxos})
+        send(client, {:utxos, Map.to_list(state.utxos)})
         state
 
       {:get_working_on, client} ->
         {tx, _} = state.working_on
-        send(client, {:working_on, [tx, state.height]})
+        send(client, {:working_on, [tx, state.height+1]})
         state
 
       _ -> state
@@ -216,18 +216,17 @@ defmodule BlockchainNode do
               Task.shutdown(state.pow_pid, :brutal_kill)
             end
 
-            # check whether node was working on same tx
-            if {block.transaction, block.transaction.txid} != state.working_on do
-              case in_mempool(state.mempool, block.transaction.txid) do
-                true -> %{state | mempool: Enum.filter(state.mempool, fn {id, _tx} -> id != block.transaction.txid end)}
-                false -> %{state | mempool: [state.working_on] ++ state.mempool}
+            state =
+              # check whether block mined is different from the block this node has been mining
+              case { block.transaction.txid, Map.delete(block.transaction, :txid) } != state.working_on do
+                true -> %{state | mempool: [state.working_on] ++ state.mempool} # re-add failed block tx to mempool
+                false -> state
               end
-            end
 
             %{state |
                 blockchain: state.blockchain ++ [block],
                 pow_pid: nil,
-                working_on: nil,
+                working_on: {nil, nil},
                 height: state.height + 1,
                 utxos: update_UTXO(state.utxos, block)}
           else
@@ -238,9 +237,14 @@ defmodule BlockchainNode do
   end
 
   defp update_UTXO(utxos, block) do
+    outputs =
+      case Enum.any?(block.transaction.outputs, fn {a, _v} -> Map.has_key?(utxos, a) end) do  # if address output is already in UTXO
+      true -> Enum.map(block.transaction.outputs, fn {a, v} -> {a, v + Map.get(utxos, a, 0)} end) # sum up the values
+      false -> block.transaction.outputs
+    end
+
     input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end)
-    outputs = Map.new(block.transaction.outputs, fn {a, v} -> {a, v} end)
-    # update UTXO set by removing inputs and adding outputs
+    outputs = Map.new(outputs, fn {a, v} -> {a, v} end)
     utxos |> Map.drop(input_addresses) |> Map.merge(outputs)
   end
 

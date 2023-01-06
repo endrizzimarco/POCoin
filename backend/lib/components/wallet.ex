@@ -260,6 +260,25 @@ defmodule Wallet do
     Enum.reduce(state.available_UTXOs, 0, fn {_addr, val}, sum -> sum + val end)
   end
 
+  defp check_deliver_txpool(state) do
+    if state.transaction_pool != [] do
+      deliver_txpool(state)
+    else
+      state
+    end
+  end
+
+  defp process_tx_outputs(state, outputs) do
+    outs = owned_outputs(state, outputs)
+    Enum.reduce(outs, state, fn {addr, amount}, state ->
+      if Map.has_key?(state.available_UTXOs, addr) do
+        %{state | available_UTXOs: Map.update!(state.available_UTXOs, addr, fn val -> val+amount end)}
+      else
+        %{state | available_UTXOs: Map.put(state.available_UTXOs, addr, amount)}
+      end
+    end)
+  end
+
   # Poll a node process for the latest blocks in the blockchain
   defp poll_for_blocks(state) do
     new_blocks = BlockchainNode.get_new_blocks(state.node, state.scanned_height)
@@ -267,37 +286,33 @@ defmodule Wallet do
       [h | t] ->
         Enum.reduce([h | t], state, fn block, state ->
           state = %{state | scanned_height: block.height}
+
           cond do
-            Map.has_key?(state.pending, block.height) ->  # for sent transactions...
-              %{state |
+            # SENT: block contains a sent transaction from this wallet
+            Map.has_key?(state.pending, block.transaction.txid) ->
+              # handle outputs
+              state = process_tx_outputs(state, block.transaction.outputs)
+              # handle transaction
+              state = %{state |
                 past_transactions: state.past_transactions ++ [{block.height, "send", block.transaction}],
                 pending: Map.delete(state.pending, block.transaction.txid)
               }
+              # check if there are pending transactions that can now be delivered
+              check_deliver_txpool(state)
 
-            owned_outputs(state, block.transaction.outputs) -> # for received transaction...
-              outs = owned_outputs(state, block.transaction.outputs)
-
+            # RECEIVED: block contains a receive transaction for this wallet
+            owned_outputs(state, block.transaction.outputs) != [] -> # for received transaction...
               # handle outputs
-              state = Enum.reduce(outs, state, fn {addr, amount}, state ->
-                if Map.has_key?(state.available_UTXOs, addr) do
-                  %{state | available_UTXOs: Map.update!(state.available_UTXOs, addr, fn val -> val+amount end)}
-                else
-                  %{state | available_UTXOs: Map.put(state.available_UTXOs, addr, amount)}
-                end
-              end)
-
+              state = process_tx_outputs(state, block.transaction.outputs)
               # handle transaction
-              state = %{state | past_transactions: state.past_transactions ++ [{block.height, "receive", block.transaction}],
-                                pending: Map.delete(state.pending, block.transaction.txid)}
+              state = %{state |
+                past_transactions: state.past_transactions ++ [{block.height, "receive", block.transaction}],
+                pending: Map.delete(state.pending, block.transaction.txid)}
+              # check if there are pending transactions that can now be delivered
+              check_deliver_txpool(state)
 
-              # deliver the transactions in txpool (if possible, else put them at the back of the queue)
-              if state.transaction_pool != [] do
-                deliver_txpool(state)
-              else
-                state
-              end
-
-            true -> state # not related to this wallet
+            # UNRELATED: block not related to this wallet
+            true -> state
           end
         end)
 
