@@ -65,8 +65,6 @@ const generateAddress = async () => {
   response.status === 200
     ? message.success('Successfully generated address')
     : message.error('Failed to generate address')
-
-  //console.log('wallet', props.wallet)
 }
 </script>
 

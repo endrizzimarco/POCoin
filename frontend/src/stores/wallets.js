@@ -64,6 +64,7 @@ export const useWalletStore = defineStore('walletStore', () => {
   }
 
   const pollWallet = w => {
+    getWalletStats(w)
     intervals[w] = setInterval(() => getWalletStats(w), 1000)
   }
 
