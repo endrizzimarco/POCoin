@@ -16,7 +16,8 @@ const endpoints = [
   'http://localhost:3000/available_balance',
   'http://localhost:3000/addresses',
   'http://localhost:3000/available_utxos',
-  'http://localhost:3000/history'
+  'http://localhost:3000/history',
+  'http://localhost:3000/pending'
 ]
 
 export const useWalletStore = defineStore('walletStore', () => {
@@ -25,14 +26,24 @@ export const useWalletStore = defineStore('walletStore', () => {
     clearInterval(intervals[w])
   }
 
-  const wallet = ref({ w1: state, w2: state, w3: state, m: state })
+  const wallet = ref({ w1: state, w2: state, w3: state, w4: state, w5: state })
+
   const addresses = computed(() => {
-    return {
-      alice: wallet.value['w1']?.addresses.map(obj => Object.keys(obj)[0]),
-      bob: wallet.value['w2']?.addresses.map(obj => Object.keys(obj)[0]),
-      charlie: wallet.value['w3']?.addresses.map(obj => Object.keys(obj)[0]),
-      master: wallet.value['m']?.addresses.map(obj => Object.keys(obj)[0])
-    }
+    const wallets = [
+      { name: 'Alice', w: 'w1' },
+      { name: 'Bob', w: 'w2' },
+      { name: 'Charlie', w: 'w3' },
+      { name: 'Marco', w: 'w4' },
+      { name: 'Georgi', w: 'w5' }
+    ]
+    return wallets.map(obj => {
+      return {
+        label: obj.name,
+        options: wallet.value[obj.w].addresses.map(obj => {
+          return { value: Object.keys(obj)[0], label: Object.keys(obj)[0] }
+        })
+      }
+    })
   })
 
   const getWalletStats = async w => {
@@ -59,17 +70,18 @@ export const useWalletStore = defineStore('walletStore', () => {
           txid: x[2].substring(0, 25),
           amount: x[3].toFixed(2)
         }
-      })
+      }),
+      next_pending: responses[5].data
     }
   }
 
   const pollWallet = w => {
     getWalletStats(w)
-    intervals[w] = setInterval(() => getWalletStats(w), 1000)
+    intervals[w] = setInterval(() => getWalletStats(w), 500)
   }
 
   const initWalletsState = () => {
-    ;['w1', 'w2', 'w3', 'm'].forEach(w => {
+    ;['w1', 'w2', 'w3', 'w4', 'w5'].forEach(w => {
       getWalletStats(w)
     })
   }

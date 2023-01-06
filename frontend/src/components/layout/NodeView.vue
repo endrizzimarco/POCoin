@@ -43,11 +43,10 @@ onMounted(() => {
 <template lang="pug">
 .h-full.flex.flex-col
   a-card.shadow-md.rounded(
-    title='Nodes',
     :tab-list='tabList',
     :active-tab-key='activeKey',
     @tabChange='key => tabChange(key)',
-    :headStyle={ height: '6.1rem' }
+    style='height: 90vh'
   )
     NodeStats(:node='activeKey')
 </template>

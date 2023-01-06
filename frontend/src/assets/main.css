@@ -41,3 +41,12 @@ body {
 .anticon svg {
   margin-bottom: 4px;
 }
+
+/* Overlapping lines fix */
+.ant-tabs-large > .ant-tabs-nav .ant-tabs-tab {
+  padding: 12px 0px !important;
+}
+
+.ant-btn-primary { 
+  background-color: #1890ff !important;
+}

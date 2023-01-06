@@ -28,7 +28,7 @@ defmodule BlockchainNode do
   end
 
   def init(name, nodes, gen_pub_key, paxos_pid) do
-    total_supply = 200
+    total_supply = 1000
     genesis_transaction = %{txid: "genesis", signatures: [], inputs: [], outputs: [{derive_address(gen_pub_key), total_supply}]}
 
     state = %{

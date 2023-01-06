@@ -36,7 +36,7 @@ defmodule Wallet do
         if change < 0 do
           cond do
             waiting_for_pending_utxos(state, amount) ->
-              send(client, {:ok, "added to pending wallet transactions (waiting for other UTXOs to confirm)"})
+              send(client, {:ok, "Added to pending wallet transactions (waiting for other UTXOs to confirm)"})
               %{state | transaction_pool: state.transaction_pool ++ [{client, to_addr, amount}]}
             true ->
               send(client, {:error, "not enough funds"})
@@ -56,7 +56,7 @@ defmodule Wallet do
           # send transaction to node for processing
           send(state.node, {:new_transaction, self(), txid, transaction})
           receive do
-            {:ok, txid} -> send(client, {:ok, "transaction #{inspect txid} accepted by node #{inspect state.node}"})
+            {:ok, txid} -> send(client, {:ok, "Transaction #{inspect txid} accepted by node #{inspect state.node}"})
             {:bad_transaction, _} -> send(client, {:error, "transaction #{inspect txid} rejected: invalid payload"})
             after 1000 -> send(client, {:error, "node timeout"})
           end
@@ -101,6 +101,16 @@ defmodule Wallet do
         send(client, {:history, state.past_transactions})
         state
 
+      {:get_pending_tx, client} ->
+        cond do
+          List.first(state.transaction_pool) != nil ->
+            {_client, to_addr, amount} = List.first(state.transaction_pool)
+            send(client, {:pending_tx, {to_addr, amount}})
+
+          true -> send(client, {:pending_tx, nil})
+        end
+        state
+
       _ -> state
 
       after 500 -> state
@@ -118,7 +128,7 @@ defmodule Wallet do
     IO.puts("request to send #{amount} to #{address}")
     send(w, {:spend, self(), address, amount})
     receive do
-      {:ok, msg} -> IO.puts("ok: " <> msg)
+      {:ok, msg} -> IO.puts("ok: " <> msg); msg
       {:error, msg} -> IO.puts("error: " <> msg)
     after
       2000 -> :timeout
@@ -187,6 +197,15 @@ defmodule Wallet do
     send(w, {:get_history, self()})
     receive do
       {:history, data} -> data
+    after
+      1000 -> :timeout
+    end
+  end
+
+  def get_pending_tx(w) do
+    send(w, {:get_pending_tx, self()})
+    receive do
+      {:pending_tx, data} -> data
     after
       1000 -> :timeout
     end

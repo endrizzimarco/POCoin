@@ -9,26 +9,23 @@ defmodule Master do
     # spawn nodes
     nodes_pids = for name <- node_names, do: BlockchainNode.start(name, node_names, paxos_names, pub_key)
 
-    # master wallet
-    master_pid = Wallet.start(String.to_atom("m"), Enum.at(nodes_pids, 0))
-    Wallet.add_keypair(master_pid, {pub_key, priv_key})  # provide master with full genesis amount
+    # spawn wallets
+    wallet_pids = for x <- 0..4, do: Wallet.start(String.to_atom("w#{x+1}"), Enum.at(nodes_pids, x))
+    alice_pid = Enum.at(wallet_pids, 0)
 
-    # generate alice, bob and charlie's wallets
-    wallet_pids = for x <- 1..3, do: Wallet.start(String.to_atom("w#{x}"), Enum.at(nodes_pids, x))
-    [alice, bob, _charlie] = for w <- wallet_pids, do: Wallet.generate_address(w)
+    # provide alice with full genesis amount
+    Wallet.add_keypair(alice_pid, {pub_key, priv_key})
 
-    Process.sleep(100) # let the master wallet realise he has control of the genesis amount
+    # generate addresses for everyone
+    [_alice, bob, charlie, marco, georgi] = for w <- wallet_pids, do: Wallet.generate_address(w)
 
-    # send 20 coins each to alice and bob
-    Wallet.send(master_pid, alice, 20)
-    Wallet.send(master_pid, bob, 20)
-    Wallet.send(master_pid, bob, 20)
-    Wallet.send(:global.whereis_name(:w2), alice, 1)
-    Wallet.send(:global.whereis_name(:w1), bob, 1)
-    Wallet.send(master_pid, bob, 1)
+    # distribute coins to everyone
+    Wallet.send(alice_pid, bob, 200)
+    Wallet.send(alice_pid, charlie, 200)
+    Wallet.send(alice_pid, marco, 200)
+    Wallet.send(alice_pid, georgi, 200)
 
-
-    {nodes_pids, master_pid, wallet_pids}
+    {nodes_pids, wallet_pids}
   end
 
   defp get_names(n, id) do

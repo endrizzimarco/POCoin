@@ -4,8 +4,7 @@ IEx.Helpers.c "components/wallet.ex", "."
 IEx.Helpers.c "components/node.ex", "."
 IEx.Helpers.c "components/master.ex", "."
 
-{nodes_pids, master_pid, wallet_pids} = Master.start()
-IO.puts("master_pid: #{inspect master_pid}")
+{nodes_pids, wallet_pids} = Master.start()
 IO.puts("wallet_pids: #{inspect wallet_pids}")
 IO.puts("nodes_pids: #{inspect nodes_pids}")
 

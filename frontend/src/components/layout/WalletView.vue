@@ -19,8 +19,12 @@ const tabList = [
     tab: 'Charlie'
   },
   {
-    key: 'm',
-    tab: 'Master'
+    key: 'w4',
+    tab: 'Marco'
+  },
+  {
+    key: 'w5',
+    tab: 'Georgi'
   }
 ]
 
@@ -37,13 +41,11 @@ onMounted(() => {
 </script>
 
 <template lang="pug">
-.h-full.flex.flex-col
-  a-card.shadow-md.rounded(
-    title='Wallets',
-    :tab-list='tabList',
-    :active-tab-key='activeKey',
-    @tabChange='key => tabChange(key)',
-    :headStyle={ height: '6.1rem' }
-  )
-    WalletStats(:wallet='activeKey')
+a-card.shadow-md.rounded(
+  :tab-list='tabList',
+  :active-tab-key='activeKey',
+  @tabChange='key => tabChange(key)',
+  style='height: 90vh'
+)
+  WalletStats(:wallet='activeKey')
 </template>

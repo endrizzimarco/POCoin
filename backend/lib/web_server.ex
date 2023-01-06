@@ -26,7 +26,7 @@ defmodule WebServer do
 
       ["send"] ->
         wallet = get_pid(params["wallet"])
-        to_addr = params["to"]
+        to_addr = params["to_addr"]
         amount = elem(Float.parse(params["amount"]), 0)
         response(conn, Wallet.send(wallet, to_addr, amount))
 
@@ -48,9 +48,16 @@ defmodule WebServer do
 
       ["history"] ->
         data = params["wallet"] |> get_pid |> Wallet.history()
-        data = Enum.map(data, fn {height, type, tx} -> {height, type, tx.txid, elem(Enum.at(tx.outputs, 0),1)} end)
+
+        data =
+          Enum.map(data, fn {height, type, tx} ->
+            {height, type, tx.txid, elem(Enum.at(tx.outputs, 0), 1)}
+          end)
         response(conn, data)
 
+      ["pending"] ->
+        data = params["wallet"] |> get_pid |> Wallet.get_pending_tx()
+        response(conn, data)
 
       # ======================
       # ------ Node API ------

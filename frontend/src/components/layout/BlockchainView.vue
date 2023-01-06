@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import axios from 'axios'
 
@@ -13,6 +13,8 @@ const poll_blockchain = async () => {
   blockchain.value = blockchain.value.concat(r)
   scanned_height += r.length
 }
+
+const r_blockchain = computed(() => blockchain.value.slice().reverse())
 
 onMounted(() => {
   poll_blockchain()
@@ -62,10 +64,10 @@ const toTreeData = json => {
 <template lang="pug">
 .mx-2.overflow-y-scroll(style='height: 90vh')
   TransitionGroup(name='slide-fade')
-    .px-3(v-for='(block, i) in blockchain', :key='block.height')
+    .px-3(v-for='(block, i) in r_blockchain', :key='block.height')
       .text-center(v-if='i != 0')
         a-divider.bg-slate-400.h-5(type='vertical', style='width: 2px')
-      p.bg-white.pl-8.pt-2.text-lg.rounded-t-lg.font-semibold.underline.text-zinc-600 Block {{ i + 1 }}
+      p.bg-white.pl-8.pt-2.text-lg.rounded-t-lg.font-semibold.underline.text-zinc-600 Block {{ block.height }}
       a-tree.shadow-md.rounded-b-lg.p-1.transition(:tree-data='toTreeData(block)')
         template(#title='{ title, key }')
           span.font-medium {{ typeof key != 'number' ? key + ': ' : '' }}
@@ -74,12 +76,12 @@ const toTreeData = json => {
 
 <style>
 .slide-fade-enter-active {
-  transition: all 0.5s ease-out;
+  transition: all 0.6s ease-out;
 }
 
 .slide-fade-enter-from,
 .slide-fade-leave-to {
-  transform: translateY(100px);
+  transform: translateY(-200px);
   opacity: 0.5;
 }
 

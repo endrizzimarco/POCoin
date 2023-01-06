@@ -37,7 +37,7 @@ const utxosTableCols = [
 
 <template lang="pug">
 div
-  p.pb-3.opacity-50(style='font-weight: 420') Proof of Work 
+  p.pb-2.opacity-50(style='font-weight: 420') Proof of Work
   span.pb-5(v-if='state.current[0]')
     a-spin.mr-4
     span.pb-5 Mining block {{ state.current[1] }} for transaction: {{ state.current[0].slice(0, 25) }}
@@ -61,7 +61,7 @@ div
     :columns='utxosTableCols',
     :data-source='state.utxos',
     size='small',
-    :pagination='{ hideOnSinglePage: true, pageSize: 5 }'
+    :pagination='{ hideOnSinglePage: true, pageSize: 8 }'
   )
     template(#bodycell='{ column, text }')
       template(v-if='column.dataIndex === "name"')
