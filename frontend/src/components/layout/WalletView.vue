@@ -1,8 +1,9 @@
 <script setup>
-import { useWalletStore } from '@/stores/wallets'
 import WalletStats from '@/components/WalletStats.vue'
-import { ref } from 'vue'
+import { useWalletStore } from '@/stores/wallets'
+import { ref, onMounted } from 'vue'
 
+const store = useWalletStore()
 const activeKey = ref('w1')
 const tabList = [
   {
@@ -24,10 +25,15 @@ const tabList = [
 ]
 
 const tabChange = key => {
-  useWalletStore().stopPolling(activeKey.value)
-  useWalletStore().getWalletStats(key)
+  store.stopPolling(activeKey.value)
+  store.pollWallet(key)
   activeKey.value = key
 }
+
+onMounted(() => {
+  store.initWalletsState()
+  store.pollWallet(activeKey.value)
+})
 </script>
 
 <template lang="pug">
