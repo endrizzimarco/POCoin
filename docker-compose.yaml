@@ -3,7 +3,9 @@ services:
     image: endrizzimarco/com3026-frontend
     ports:
       - "80:80"
+    domainname: "pocoin"
   backend:
     image: endrizzimarco/com3026-backend
     ports:
       - "3000:3000"
+    domainname: "pocoin"
