@@ -10,9 +10,9 @@ const state = {
 
 // lol
 const endpoints = [
-  'http://localhost:3000/mempool',
-  'http://localhost:3000/node_utxos',
-  'http://localhost:3000/working_on'
+  `http://${location.hostname}:3000/mempool`,
+  `http://${location.hostname}:3000/node_utxos`,
+  `http://${location.hostname}:3000/working_on`
 ]
 
 export const useNodeStore = defineStore('nodesStore', () => {

@@ -57,7 +57,7 @@ const getAddressPubPrivKeys = (addr, addresses) => {
 }
 
 const generateAddress = async () => {
-  const response = await axios.get('http://localhost:3000/generate_address', {
+  const response = await axios.get(`http://${location.hostname}:3000/generate_address`, {
     params: {
       wallet: props.wallet
     }
@@ -117,12 +117,11 @@ a-row
     :columns='transactionsTableCols',
     :data-source='state.history',
     size='small',
-    :pagination='{ hideOnSinglePage: true, pageSize: 4, size: "small", current: curr }'
+    :pagination='{ hideOnSinglePage: true, pageSize: 4, size: "small" }'
   )
 .mt-1
   span.opacity-50(style='font-weight: 420') Generate Address
   a-button.ml-3(size='small', @click='generateAddress') Generate
   p.opacity-50.mt-3(style='font-weight: 420') Send coins
   WalletSendForm.mt-2(:w='props.wallet')
-  p {{ curr }}
 </template>

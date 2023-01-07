@@ -12,12 +12,12 @@ const state = {
 
 // lol
 const endpoints = [
-  'http://localhost:3000/balance',
-  'http://localhost:3000/available_balance',
-  'http://localhost:3000/addresses',
-  'http://localhost:3000/available_utxos',
-  'http://localhost:3000/history',
-  'http://localhost:3000/pending'
+  `http://${location.hostname}:3000/balance`,
+  `http://${location.hostname}:3000/available_balance`,
+  `http://${location.hostname}:3000/addresses`,
+  `http://${location.hostname}:3000/available_utxos`,
+  `http://${location.hostname}:3000/history`,
+  `http://${location.hostname}:3000/pending`
 ]
 
 export const useWalletStore = defineStore('walletStore', () => {
