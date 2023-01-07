@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 EXPOSE 8080
-CMD [ "http-server", "dist" ]
+CMD http-server dist -p 80
 
 # docker build -t endrizzimarco/com3026-frontend frontend
 # docker push endrizzimarco/com3026-frontend:latest
