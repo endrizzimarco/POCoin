@@ -43,7 +43,7 @@ div
     span.pb-5 Mining block {{ state.current[1] }} for transaction: {{ state.current[0].slice(0, 25) }}
     br
   span(v-else)
-    p Node {{ props.node }} not working on anything
+    p Node {{ props.node }} not working on any block
   br
   p.pb-3.opacity-50(style='font-weight: 420') Transactions in Mempool
   a-table(
