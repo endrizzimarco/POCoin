@@ -38,11 +38,12 @@ defmodule Paxos do
       # ----- Acceptor -----
       # ====================
       {:prepare, proposer, b} ->
+        {i, bal} = {inst(b), Map.get(state.bal, inst(b))}
         # If the ballot is greater than the currently highest seen ballot, send back a :prepared message
-        if b > Map.get(state.bal, inst(b)) and not already_decided(state, inst(b)) do
-          # IO.puts("#{inspect state.name}: promised ballot #{inspect b} for instance #{inspect inst(b)}")
-          state = %{state | bal: Map.put(state.bal, inst(b), b)}
-          {a_bal, a_val} = {Map.get(state.a_bal, inst(b)), Map.get(state.a_val, inst(b))}
+        if b > bal and not already_decided(state, i) do
+          # IO.puts("#{inspect state.name}: promised ballot #{inspect b} for instance #{inspect i}")
+          state = %{state | bal: Map.put(state.bal, i, b)}
+          {a_bal, a_val} = {Map.get(state.a_bal, i), Map.get(state.a_val, i)}
           send(proposer, {:prepared, b, a_bal, a_val})
           state
         else
@@ -51,12 +52,13 @@ defmodule Paxos do
         end
 
       {:accept, proposer, b, v} ->
+        {i, bal} = {inst(b), Map.get(state.bal, inst(b))}
         # If the ballot is greater than the current ballot, accept the ballot and send an :accepted message
-        if b >= Map.get(state.bal, inst(b)) and not already_decided(state, inst(b)) do
-          # IO.puts("#{inspect state.name}: accepted ballot #{inspect b} for instance #{inspect inst(b)} with value #{inspect v}")
-          state = %{state | bal: Map.put(state.bal, inst(b), b),
-                            a_bal: Map.put(state.a_bal, inst(b), b),
-                            a_val: Map.put(state.a_val, inst(b), v)}
+        if b >= bal and not already_decided(state, i) do
+          # IO.puts("#{inspect state.name}: accepted ballot #{inspect b} for instance #{inspect i} with value #{inspect v}")
+          state = %{state | bal: Map.put(state.bal, i, b),
+                            a_bal: Map.put(state.a_bal, i, b),
+                            a_val: Map.put(state.a_val, i, v)}
           send(proposer, {:accepted, b, v})
           state
         else
@@ -89,29 +91,31 @@ defmodule Paxos do
 
 
       {:prepared, b, a_bal, a_val} ->
+        i = inst(b)
         # collect :prepared messages for an instance of paxos
-        state = %{state | prepared: Map.update(state.prepared, inst(b), [{a_bal, a_val}], fn list -> [{a_bal, a_val} | list] end)}
+        state = %{state | prepared: Map.update(state.prepared, i, [{a_bal, a_val}], fn list -> [{a_bal, a_val} | list] end)}
 
         # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
-        if length(state.prepared[inst(b)]) == state.quorum do
-          # IO.puts("#{inspect state.name}: received quorum of prepared messages for instance #{inspect inst(b)}")
-          v = decide_proposal(inst(b), state)
+        if length(state.prepared[i]) == state.quorum do
+          # IO.puts("#{inspect state.name}: received quorum of prepared messages for instance #{inspect i}")
+          v = decide_proposal(i, state)
           beb_broadcast({:accept, self(), b, v}, state.processes)
-          %{state | prepared: Map.delete(state.prepared, inst(b)),
-                    proposed_value: Map.delete(state.proposed_value, inst(b))} # cleanup
+          %{state | prepared: Map.delete(state.prepared, i),
+                    proposed_value: Map.delete(state.proposed_value, i)} # cleanup
         else
           state
         end
 
       {:accepted, b, v} ->
+        i = inst(b)
         # increment accepted count for this ballot
-        state = %{state | accepted: Map.update(state.accepted, inst(b), 1, fn x -> x + 1 end)}
+        state = %{state | accepted: Map.update(state.accepted, i, 1, fn x -> x + 1 end)}
         # if quorum of prepared messages, commit value with paxos processes and communicate back to client
-        if state.accepted[inst(b)] == state.quorum do
-          # IO.puts("#{inspect state.name}: decided value #{inspect v} for instance #{inspect inst(b)}")
-          beb_broadcast({:decided, inst(b), v}, state.processes)
+        if state.accepted[i] == state.quorum do
+          # IO.puts("#{inspect state.name}: decided value #{inspect v} for instance #{inspect i}")
+          beb_broadcast({:decided, i, v}, state.processes)
           send(state.client[b], {:decided, v})
-          %{state | accepted: Map.delete(state.accepted, inst(b)), client: Map.delete(state.client, b)} # cleanup
+          %{state | accepted: Map.delete(state.accepted, i), client: Map.delete(state.client, b)} # cleanup
         else
           state
         end
@@ -164,7 +168,7 @@ defmodule Paxos do
     send(pid, {:get_decision, self(), inst})
     receive do
       {:ok, v} when v != nil -> v
-      {:error, m} -> nil
+      {:error, _m} -> nil
       true -> nil
     after
       t -> {:timeout}
