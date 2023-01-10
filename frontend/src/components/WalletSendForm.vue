@@ -36,10 +36,17 @@ a-form(layout='inline', :model='formState', @finish='sendCoins')
       :min='0.1',
       :step='1',
       :max='available_balance',
-      style='max-width: 80px'
+      style='max-width: 80px',
+      :disabled='available_balance <= 0'
     )
   a-form-item(name='addr', :rules='[{ required: true, message: "Please input an address" }]')
-    a-select(v-model:value='formState.addr', :options='store.addresses', placeholder='Address', style='width: 230px')
+    a-select(
+      v-model:value='formState.addr',
+      :options='store.addresses',
+      placeholder='Address',
+      style='width: 230px',
+      :disabled='available_balance <= 0'
+    )
   a-form-item
-    a-button(html-type='submit') Send
+    a-button(html-type='submit', :disabled='available_balance <= 0') Send
 </template>
