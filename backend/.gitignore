@@ -27,3 +27,5 @@ web_server-*.tar
 
 # Beam artifacts
 **beam
+
+**.DS_Store

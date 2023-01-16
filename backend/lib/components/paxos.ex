@@ -15,6 +15,7 @@ defmodule Paxos do
       name: name,
       processes: participants,
       quorum: div(length(participants), 2) + 1,
+      nacked: %{}, # store nacked ballots for an instance %{inst => {prevBal}}
       decided: %{}, # log of decided values %{inst => value}
 
       # == acceptor state ==
@@ -84,11 +85,25 @@ defmodule Paxos do
       {:propose, client, inst, value} ->
         # IO.puts("#{inspect state.name}: received propose request for instance #{inspect inst} with value #{inspect value}")
 
-        # brodcast prepare message to all acceptors
-        b = {inst, state.name} # unique ballot is used to break ties
-        beb_broadcast({:prepare, self(), b}, state.processes)
-        %{state | proposed_value: Map.put(state.proposed_value, inst, value), client: Map.put(state.client, b, client)}
+        cond do
+          # if already proposing for same ballot return abort message to client
+          already_decided(state, inst) ->
+            send(client, {:abort, inst})
+            state
 
+          # no concurrent proposals for this instance
+          true ->
+          # b = {inst, counter, proc_name}
+          {b, state} = if Map.has_key?(state.nacked, inst) do
+              {{inst, state.nacked[inst]+1, state.name}, %{state | nacked: state.nacked[inst]+1}} # increasing ballot
+            else
+              {{inst, 0, state.name}, state} # first ballot for this instance
+            end
+            # brodcast prepare message to all acceptors
+            beb_broadcast({:prepare, self(), b}, state.processes)
+            %{state | proposed_value: Map.put(state.proposed_value, inst, value),
+                      client: Map.put(state.client, b, client)}
+        end
 
       {:prepared, b, a_bal, a_val} ->
         i = inst(b)
@@ -115,7 +130,9 @@ defmodule Paxos do
           # IO.puts("#{inspect state.name}: decided value #{inspect v} for instance #{inspect i}")
           beb_broadcast({:decided, i, v}, state.processes)
           send(state.client[b], {:decided, v})
-          %{state | accepted: Map.delete(state.accepted, i), client: Map.delete(state.client, b)} # cleanup
+          %{state | accepted: Map.delete(state.accepted, i),
+                    client: Map.delete(state.client, b),
+                    nacked: Map.delete(state.nacked, i)} # cleanup
         else
           state
         end
@@ -123,7 +140,8 @@ defmodule Paxos do
       {:nack, b} ->
         if Map.has_key?(state.client, b) do
           send(state.client[b], {:abort}) # ensure safety by aborting if a nack is received
-          %{state | client: Map.delete(state.client, b)}
+          %{state | client: Map.delete(state.client, b),
+                    nacked: Map.put(state.nacked, inst(b), elem(b, 1))}
         else
           state
         end
