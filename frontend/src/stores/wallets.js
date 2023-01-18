@@ -10,16 +10,6 @@ const state = {
   history: []
 }
 
-// lol
-const endpoints = [
-  `http://${location.hostname}:3000/balance`,
-  `http://${location.hostname}:3000/available_balance`,
-  `http://${location.hostname}:3000/addresses`,
-  `http://${location.hostname}:3000/available_utxos`,
-  `http://${location.hostname}:3000/history`,
-  `http://${location.hostname}:3000/pending`
-]
-
 export const useWalletStore = defineStore('walletStore', () => {
   var intervals = {}
   const stopPolling = w => {
@@ -47,37 +37,13 @@ export const useWalletStore = defineStore('walletStore', () => {
   })
 
   const getWalletStats = async w => {
-    const responses = await axios.all(
-      endpoints.map(endpoint =>
-        axios.get(endpoint, {
-          params: {
-            wallet: w
-          }
-        })
-      )
-    )
-    wallet.value[w] = {
-      total_balance: responses[0].data,
-      available_balance: responses[1].data,
-      addresses: responses[2].data,
-      available_utxos: responses[3].data.map(utxo => {
-        return { address: utxo[0], balance: utxo[1].toFixed(2) }
-      }),
-      history: responses[4].data.map(x => {
-        return {
-          block: x[0],
-          type: x[1],
-          txid: x[2].substring(0, 25),
-          amount: x[3].toFixed(2)
-        }
-      }),
-      next_pending: responses[5].data
-    }
+    const r = await axios.get(`http://${location.hostname}:3000/wallet_stats?wallet=${w}`)
+    wallet.value[w] = r.data
   }
 
   const pollWallet = w => {
     getWalletStats(w)
-    intervals[w] = setInterval(() => getWalletStats(w), 500)
+    intervals[w] = setInterval(() => getWalletStats(w), 1000)
   }
 
   const initWalletsState = () => {
