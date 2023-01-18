@@ -24,9 +24,9 @@ a-layout
   background: linear-gradient(to right, #000000, #141414);
   background-size: 400% 400%;
 
-  -webkit-animation: header-animation 6s ease infinite;
-  -moz-animation: header-animation 6s ease infinite;
-  animation: header-animation 6s ease infinite;
+  -webkit-animation: header-animation 6s ease-in-out infinite;
+  -moz-animation: header-animation 6s ease-in-out infinite;
+  animation: header-animation 6s ease-in-out infinite;
 }
 
 @-webkit-keyframes header-animation {
