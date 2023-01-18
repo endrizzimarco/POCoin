@@ -46,3 +46,8 @@ body {
 .ant-tabs-large > .ant-tabs-nav .ant-tabs-tab {
   padding: 13px 0px !important;
 }
+
+/* Remove table pagination bottom margin */
+.ant-table-pagination.ant-pagination {
+  margin: 10px 0px 0px 0px;
+}
