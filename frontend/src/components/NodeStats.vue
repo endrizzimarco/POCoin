@@ -1,5 +1,5 @@
 <script setup>
-import { LoadingOutlined } from '@ant-design/icons-vue'
+import { LoadingOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
 import { useNodeStore } from '@/stores/nodes'
 import { onMounted, computed, h } from 'vue'
 import axios from 'axios'
@@ -36,34 +36,45 @@ const utxosTableCols = [
 </script>
 
 <template lang="pug">
-div
+.mining-power
+  p.pb-2.opacity-50(style='font-weight: 420') Mining Power
+    a-tooltip(placement='right')
+      template(#title)
+        span Percentage of blocks this node has mined (used for selecting next validators)
+      question-circle-outlined.ml-1(style='font-size: 14px; bottom: 1px')
+  a-progress(type='circle', :stroke-color='{ "0%": "#1DA57A", "100%": "#6c52eb" }', :percent='+state.mining_power')
+
+.proof-of-work.mt-6
   p.pb-2.opacity-50(style='font-weight: 420') Proof of Work
-  span.pb-5(v-if='state.current[0]')
-    a-spin.mr-4
-    span.pb-5 Mining block {{ state.current[1] }} for transaction: {{ state.current[0].slice(0, 25) }}
-    br
+  a-alert.pb-5(v-if='state.current[0]', type='info')
+    template(#description)
+      a-spin.mr-3
+      span.pb-5 Mining block {{ state.current[1] }} for transaction: {{ state.current[0].slice(0, 25) }}
   span(v-else)
     p Node {{ props.node }} not working on any block
-  br
-  p.pb-3.opacity-50(style='font-weight: 420') Transactions in Mempool
+
+.mempool.mt-6
+  p.pb-2.opacity-50(style='font-weight: 420') Transactions in Mempool
   a-table(
+    v-if='state.mempool.length > 0',
     :columns='mempoolTableCols',
     :data-source='state.mempool',
     size='small',
     :pagination='{ hideOnSinglePage: true, pageSize: 5 }'
   )
-    template(#bodycell='{ column, text }')
-      template(v-if='column.dataIndex === "name"')
-        a {{ text }}
-  br
-  p.pb-3.opacity-50(style='font-weight: 420') Blockchain UTXOs
+  p(v-else) No transactions in mempool
+
+.utxos.mt-6
+  p.pb-2.opacity-50(style='font-weight: 420') Blockchain UTXOs
   a-table(
     :columns='utxosTableCols',
     :data-source='state.utxos',
     size='small',
-    :pagination='{ hideOnSinglePage: true, pageSize: 8 }'
+    :pagination='{ hideOnSinglePage: true, pageSize: 6 }'
   )
-    template(#bodycell='{ column, text }')
-      template(v-if='column.dataIndex === "name"')
-        a {{ text }}
+    template(#bodyCell='{ column, record }')
+      template(v-if='column.key === "balance"')
+        p {{ record['balance'].toFixed(2) }}
+    template(#footer)
+      p.text-right.m-0 1000.00
 </template>
