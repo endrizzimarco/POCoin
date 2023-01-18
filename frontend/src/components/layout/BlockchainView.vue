@@ -7,7 +7,7 @@ const blockchain = ref([])
 var scanned_height = 0
 
 const poll_blockchain = async () => {
-  const r = await (await axios.get(`http://${location.hostname}:3000/blockchain?node=n1&height=${scanned_height}`)).data
+  const r = await (await axios.get(`http://localhost:3000/blockchain?node=n1&height=${scanned_height}`)).data
   if (r == 'up_to_date') return
   if (r.length == 1) message.success(`New block mined by ${r[0].miner}`)
   blockchain.value = blockchain.value.concat(r)
@@ -40,9 +40,9 @@ const toTreeData = json => {
         leaf.title = ''
         leaf.children = toTreeData(json[key])
         break
+      case 'signatures':
       case 'outputs':
       case 'inputs':
-      case 'signatures':
         leaf.children = []
         leaf.title = ''
         for (const item of json[key]) {

@@ -49,9 +49,8 @@ const utxosTableCols = [
   a-alert.pb-5(v-if='state.current[0]', type='info')
     template(#description)
       a-spin.mr-3
-      span.pb-5 Mining block {{ state.current[1] }} for transaction: {{ state.current[0].slice(0, 25) }}
-  span(v-else)
-    p Node {{ props.node }} not working on any block
+      span.pb-5 Mining block {{ state.current[1] }} for transaction {{ state.current[0].slice(0, 25) }}
+  p(v-else) Node {{ props.node }} not working on any block
 
 .mempool.mt-6
   p.pb-2.opacity-50(style='font-weight: 420') Transactions in Mempool
@@ -70,11 +69,11 @@ const utxosTableCols = [
     :columns='utxosTableCols',
     :data-source='state.utxos',
     size='small',
-    :pagination='{ hideOnSinglePage: true, pageSize: 6 }'
+    :pagination='{ hideOnSinglePage: true, pageSize: 5 }'
   )
     template(#bodyCell='{ column, record }')
       template(v-if='column.key === "balance"')
         p {{ record['balance'].toFixed(2) }}
     template(#footer)
-      p.text-right.m-0 1000.00
+      p.text-right.m-0 Total: &nbsp; {{ state.utxos.reduce((a, b) => a + b.balance, 0).toFixed(2) }}
 </template>

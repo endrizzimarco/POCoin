@@ -2,8 +2,6 @@
 import WalletSendForm from '@/components/WalletSendForm.vue'
 import { QuestionCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons-vue'
 import { useWalletStore } from '@/stores/wallets'
-import { message } from 'ant-design-vue'
-import axios from 'axios'
 import { computed } from 'vue'
 
 const props = defineProps({
@@ -57,17 +55,6 @@ const transactionsTableCols = [
 const getAddressPubPrivKeys = (addr, addresses) => {
   return addresses.find(x => Object.keys(x)[0] === addr)[addr]
 }
-
-const generateAddress = async () => {
-  const response = await axios.get(`http://${location.hostname}:3000/generate_address`, {
-    params: {
-      wallet: props.wallet
-    }
-  })
-  response.status === 200
-    ? message.success('Successfully generated address')
-    : message.error('Failed to generate address')
-}
 </script>
 
 <template lang="pug">
@@ -95,7 +82,7 @@ a-row.balance
     :columns='addressesTableCols',
     :data-source='state.available_utxos',
     size='small',
-    :pagination='{ hideOnSinglePage: true, pageSize: 4, size: "small" }'
+    :pagination='{ hideOnSinglePage: true, pageSize: 3, size: "small" }'
   )
     template(#bodyCell='{ column, record }')
       template(v-if='column.key === "balance"')
@@ -110,7 +97,7 @@ a-row.balance
   a-alert.z-50.absolute.w-full.top-5(v-if='state.next_pending', type='info', closable)
     template(#description)
       a-spin.mr-4
-      span.font-semibold.underline Pending Transaction
+      span.font-semibold Pending Transaction
       p.ml-12
         span.font-semibold To Address:
         span &nbsp; {{ state.next_pending[0] }}
@@ -118,7 +105,7 @@ a-row.balance
         span.font-semibold Amount:
         span &nbsp; {{ state.next_pending[1] }}
 
-.past-transactions.mt-6
+.past-transactions.mt-5
   p.pb-3.opacity-50(style='font-weight: 420') Past Transactions
   a-table(
     :columns='transactionsTableCols',
@@ -137,7 +124,7 @@ a-row.balance
           arrow-left-outlined(style='bottom: 1px')
           span RECEIVE
 
-.send-coins.mt-1
+.send-coins.mt-4
   p.opacity-50.mt-3(style='font-weight: 420') Send coins
   WalletSendForm.mt-2(:w='props.wallet')
 </template>
