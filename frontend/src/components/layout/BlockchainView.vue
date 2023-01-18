@@ -48,7 +48,7 @@ const toTreeData = json => {
         for (const item of json[key]) {
           leaf.children.push({
             key: Math.random(),
-            title: item?.slice(0, 25)
+            title: item?.slice(0, 35)
           })
         }
         break
@@ -67,11 +67,13 @@ const toTreeData = json => {
     .px-3(v-for='(block, i) in r_blockchain', :key='block.height')
       .text-center(v-if='i != 0')
         a-divider.bg-slate-400.h-5(type='vertical', style='width: 2px')
-      p.bg-white.pl-8.pt-2.text-lg.rounded-t-lg.font-semibold.underline.text-zinc-600 Block {{ block.height }}
-      a-tree.shadow-md.rounded-b-lg.p-1.transition(:tree-data='toTreeData(block)')
-        template(#title='{ title, key }')
-          span.font-medium {{ typeof key != 'number' ? key + ': ' : '' }}
-          span {{ title }}
+      a-card.shadow-md.rounded-lg.trasitiom(size='small')
+        template(#title)
+          span.font-semibold.text-lg.ml-3 Block {{ block.height }}
+        a-tree(:tree-data='toTreeData(block)')
+          template(#title='{ title, key }')
+            span.font-medium {{ typeof key != 'number' ? key + ': ' : '' }}
+            span {{ title }}
 </template>
 
 <style>
@@ -91,7 +93,7 @@ const toTreeData = json => {
 }
 ::-webkit-scrollbar-thumb {
   border-radius: 4px;
-  background-color: rgba(0, 0, 0, 0.2);
-  -webkit-box-shadow: 0 0 1px rgba(255, 255, 255, 0.5);
+  background: linear-gradient(180deg, #28896a, 75%, #6c52eb);
+  -webkit-box-shadow: 0 0 1px rgba(223, 3, 3, 0.5);
 }
 </style>

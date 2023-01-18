@@ -48,5 +48,5 @@ a-form(layout='inline', :model='formState', @finish='sendCoins')
       :disabled='available_balance <= 0'
     )
   a-form-item
-    a-button(html-type='submit', :disabled='available_balance <= 0') Send
+    a-button(type='primary', html-type='submit', :disabled='available_balance <= 0') Send
 </template>
