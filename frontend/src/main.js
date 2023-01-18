@@ -1,8 +1,8 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import Antd from 'ant-design-vue';
-import './assets/antd.css'
+import Antd from 'ant-design-vue'
+import 'ant-design-vue/dist/antd.dark.less'
 import './assets/main.css'
 
 const app = createApp(App)

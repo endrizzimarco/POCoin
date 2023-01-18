@@ -29,7 +29,7 @@
 /* Make the antd card tabs stick to the below
  container */
 .ant-tabs-top > .ant-tabs-nav {
-  margin-bottom: 0 !important;
+  margin-bottom: 1 !important;
 }
 
 /* hack to stop flickering during css animations */
@@ -44,9 +44,5 @@ body {
 
 /* Overlapping lines fix */
 .ant-tabs-large > .ant-tabs-nav .ant-tabs-tab {
-  padding: 12px 0px !important;
-}
-
-.ant-btn-primary { 
-  background-color: #1890ff !important;
+  padding: 13px 0px !important;
 }

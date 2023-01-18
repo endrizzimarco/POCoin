@@ -10,5 +10,14 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
+  },
+  css: {
+    preprocessorOptions: {
+      less: {
+        modifyVars: { '@primary-color': '#1DA57A', '@font-size-base': '12px' },
+        javascriptEnabled: true,
+        additionalData: '@root-entry-name: default;'
+      }
+    }
   }
 })
