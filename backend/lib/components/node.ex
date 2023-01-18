@@ -44,6 +44,7 @@ defmodule BlockchainNode do
       pow_pid: nil, # pid of the current POW process
       working_on: {nil, nil}, # transaction that is currently being worked on
       found_pow: [], # keep track of which node found the pow for a block
+      mining_power: Enum.into(nodes, %{}, fn key -> {key, 0} end) # {node => n of blocks mined}
     }
     start_beb(name)
     run(state)
@@ -72,6 +73,19 @@ defmodule BlockchainNode do
       {:pow_found, block, n} ->
         block = Map.put(block, :nonce, n) |> Map.put(:miner, state.name) # add nonce and miner to the block
         state = poll_for_blocks(state) # make sure to have latest blockchain
+        possible_validators = Map.delete(state.mining_power, state.name)
+
+        validators =
+          if state.height < 10 do
+            Map.keys(possible_validators) |> Enum.take_random(2)
+          else
+            # given a map of counts of blocks mined by each node, get percentage of blocks mined by each node
+            v1 = weighted_random(possible_validators)
+            v2 = weighted_random(Map.delete(possible_validators, v1))
+            [v1] ++ [v2]
+          end
+
+        block = Map.put(block, :next_validators, validators ++ [state.name])
 
         # start SMR
         case Paxos.propose(state.pax_pid, state.height+1, block, 1000) do
@@ -108,6 +122,14 @@ defmodule BlockchainNode do
       {:get_working_on, client} ->
         {tx, _} = state.working_on
         send(client, {:working_on, [tx, state.height+1]})
+        state
+
+      {:get_mining_power, client} ->
+        total = Enum.reduce(state.mining_power, 0, fn {_, v}, acc -> v + acc end)
+        case total do
+          0 -> send(client, {:mining_power, 0})
+          _ -> send(client, {:mining_power, state.mining_power[state.name]/total * 100})
+        end
         state
 
       _ -> state
@@ -187,6 +209,15 @@ defmodule BlockchainNode do
     end
   end
 
+  def get_mining_power(node) do
+    send(node, {:get_mining_power, self()})
+    receive do
+      {:mining_power, m_pow} -> m_pow
+      after
+      1000 -> :timeout
+    end
+  end
+
   # ==========================
   # ---- General helpers  ----
   # ==========================
@@ -228,7 +259,8 @@ defmodule BlockchainNode do
                 pow_pid: nil,
                 working_on: {nil, nil},
                 height: state.height + 1,
-                utxos: update_UTXO(state.utxos, block)}
+                utxos: update_UTXO(state.utxos, block),
+                mining_power: Map.update(state.mining_power, block.miner, 1, fn blocks_mined -> blocks_mined + 1 end)}
           else
             state
           end
@@ -246,6 +278,14 @@ defmodule BlockchainNode do
     input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end)
     outputs = Map.new(outputs, fn {a, v} -> {a, v} end)
     utxos |> Map.drop(input_addresses) |> Map.merge(outputs)
+  end
+
+  defp weighted_random(validators) do
+    total = Enum.reduce(validators, 0, fn {_, v}, acc ->  v + acc end)
+    weighted = Enum.into(validators, %{}, fn {k, v} -> {k, v/total} end)
+    Enum.reduce_while(weighted, :rand.uniform(), fn ({k, v}, remaining) ->
+      if remaining - v <= 0, do: {:halt, k}, else: {:cont, remaining - v}
+    end)
   end
 
   # =======================
@@ -266,7 +306,7 @@ defmodule BlockchainNode do
 
   defp check_work(block) do
     nonce = block.nonce
-    block = Map.drop(block, [:nonce, :miner])
+    block = Map.drop(block, [:nonce, :miner, :next_validators])
     calculate_pow_hash(block, nonce) |> String.starts_with?("000000")
   end
 
