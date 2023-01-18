@@ -7,11 +7,11 @@ const visible = ref(false)
 <template lang="pug">
 .flex.w-full
   .flex.cursor-pointer
-    img(alt='logo', src='@/assets/logo.svg', width='35', height='35')
+    img.ml-2(alt='logo', src='@/assets/logo.svg', width='35', height='35')
     p.ml-3.mt-2.text-2xl.text-white POCoin
-  p.header-subtitle(style='margin-top: 0.54rem') |
-  p.header-subtitle(style='margin-top: 0.64rem') A Blockchain visualization
-  a-button.ml-auto.mr-2.text-white.top-2(@click='visible = true', style='background-color: transparent') About
+  p.header-subtitle(style='margin-top: 0.6rem') |
+  p.header-subtitle(style='margin-top: 0.7rem') A cryptocurrency visualization
+  a-button.ml-auto.mr-2.text-white.top-2(type='primary', @click='visible = true') About
   a-modal(
     :visible='visible',
     :title='`About this project`',
@@ -35,7 +35,7 @@ const visible = ref(false)
     p.pb-5
       span.font-semibold Usage Instructions: Nodes
       span &nbsp; The POCCoin network is composed of 5 nodes, which are represented by each tab on the right side of the screen. The
-      span node API has been used to expose whether a node is working on a block, its transaction queue, aswell as the complete  UTXOs set for the blockchain.
+      span node API has been used to expose whether a node is working on a block, its transaction queue, aswell as the complete UTXOs set for the blockchain.
 
     p.pb-5
       span.font-semibold About POCCoin
