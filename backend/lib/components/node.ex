@@ -1,35 +1,39 @@
-# == Receive ==
+# == Gossip ==
 # Once a transaction is received broadcast it to the network.
 
 # == Verify ==
-# When a transaction is created, check that the sum of the inputs is equal to or greater than the sum of the outputs.
-# Also check that the UTXO are present in the UTXO set and the digitial signature. If any of these fail, the transaction is invalid otherwise add to pending.
+# When a transaction is received, check:
+# 1. The sum of the inputs is equal to the sum of outputs.
+# 2. UTXOs are not spent
+# 3. Digital sigatures are correct
+# If any of these fail, the transaction is invalid, otherwise add to mempool.
 
 # == Proof of Work ==
-# If a transaction is valid and the node has a POW available, add the block to the blockchain.
+# Start POW for the first transaction polled from the mempool.
 
 # == Paxos ==
-# Get everyone to agree with your new piece of shit block.
+# Any node that solves the POW can start a round of Paxos. Get everyone to agree on the blockchain.
 
 # == New block added ==
 # Iterate through the transaction inputs and mark the corresponding UTXOs as spent.
-# When a new transaction is added to the blockchain, add the new transaction outputs to the UTXO set.
+# Add the new transaction outputs to the UTXO set.
 
 defmodule BlockchainNode do
+  @total_supply 1000
+  @pow_difficulty 6
+
   def start(name, node_names, paxos_names, gen_pub_key) do
     index = name |> to_string() |> String.last() |> String.to_integer()
     paxos_pid = Paxos.start(String.to_atom("p#{index}"), paxos_names)
     pid = spawn(BlockchainNode, :init, [name, node_names, gen_pub_key, paxos_pid])
 
-    pid = case :global.re_register_name(name, pid) do
-            :yes -> pid
-          end
-    pid
+    case :global.re_register_name(name, pid) do
+      :yes -> pid
+    end
   end
 
   def init(name, nodes, gen_pub_key, paxos_pid) do
-    total_supply = 1000
-    genesis_transaction = %{txid: "genesis", signatures: [], inputs: [], outputs: [{derive_address(gen_pub_key), total_supply}]}
+    genesis_transaction = %{txid: "genesis", signatures: [], inputs: [], outputs: [{derive_address(gen_pub_key), @total_supply}]}
 
     state = %{
       # == distributed state ==
@@ -40,9 +44,9 @@ defmodule BlockchainNode do
       height: 1, # height of the blockchain and paxos instance
       blockchain: [%{height: 1, timestamp: 0, miner: nil, nonce: nil, prev_hash: nil, transaction: genesis_transaction}],
       mempool: [], # transactions that have been received but not yet added to the blockchain [{txid, tx}]
-      utxos: Map.put(%{}, derive_address(gen_pub_key), total_supply), # %{address => value}
+      utxos: Map.put(%{}, derive_address(gen_pub_key), @total_supply), # %{address => value}
       pow_pid: nil, # pid of the current POW process
-      working_on: {nil, nil}, # transaction that is currently being worked on
+      working_on: {nil, nil}, # transaction that is currently being worked on %{txid => tx}
       found_pow: [], # keep track of which node found the pow for a block
       mining_power: Enum.into(nodes, %{}, fn key -> {key, 0} end) # {node => n of blocks mined}
     }
@@ -64,11 +68,12 @@ defmodule BlockchainNode do
         end
 
       {:add_transaction, txid, tx} ->
-        if verify(state, tx) and not in_mempool(state, txid) do
+        state = if verify(state, tx) and not in_mempool(state, txid) do
           %{state | mempool: state.mempool ++ [{txid, tx}]}
         else
           state
         end
+        poll_mempool(state)
 
       {:pow_found, block, n} ->
         block = Map.put(block, :nonce, n) |> Map.put(:miner, state.name) # add nonce and miner to the block
@@ -97,7 +102,7 @@ defmodule BlockchainNode do
         end
         state
 
-      {:block_decided} -> poll_for_blocks(state)
+      {:block_decided} -> state |> poll_for_blocks() |> poll_mempool()
 
       # return blocks in the blockchain with height > input
       {:get_new_blocks, client, height} ->
@@ -133,10 +138,7 @@ defmodule BlockchainNode do
         state
 
       _ -> state
-
-      after 1000 -> state
     end
-    state = poll_mempool(state)
     run(state)
   end
 
@@ -149,12 +151,18 @@ defmodule BlockchainNode do
       # poll a transaction from mempool
       [{txid, tx} | lst] = state.mempool
       state = %{state | mempool: lst}
+      input_addresses = Enum.map(tx.inputs, fn pub_key -> derive_address(pub_key) end)
 
-      # start POW for this block
-      block = generate_block(state, txid, tx)
-      pid = self()
-      pow_pid = Task.async(fn -> proof_of_work(pid, block) end)
-      %{state | pow_pid: pow_pid, working_on: {txid, tx}}
+      case not_creating_money(state, input_addresses, tx.outputs) do
+        true -> # start POW for this block
+          block = generate_block(state, txid, tx)
+          pid = self()
+          pow_pid = Task.async(fn -> proof_of_work(pid, block) end)
+          %{state | pow_pid: pow_pid, working_on: {txid, tx}}
+
+        false -> # skip this transaction
+          poll_mempool(state)
+      end
     else
       state
     end
@@ -186,7 +194,7 @@ defmodule BlockchainNode do
     send(node, {:get_mempool, self()})
     receive do
       {:mempool, mempool} -> mempool
-      after
+    after
       1000 -> :timeout
     end
   end
@@ -195,7 +203,7 @@ defmodule BlockchainNode do
     send(node, {:get_utxos, self()})
     receive do
       {:utxos, utxos} -> utxos
-      after
+    after
       1000 -> :timeout
     end
   end
@@ -204,7 +212,7 @@ defmodule BlockchainNode do
     send(node, {:get_working_on, self()})
     receive do
       {:working_on, data} -> data
-      after
+    after
       1000 -> :timeout
     end
   end
@@ -213,7 +221,7 @@ defmodule BlockchainNode do
     send(node, {:get_mining_power, self()})
     receive do
       {:mining_power, m_pow} -> m_pow
-      after
+    after
       1000 -> :timeout
     end
   end
@@ -269,15 +277,9 @@ defmodule BlockchainNode do
   end
 
   defp update_UTXO(utxos, block) do
-    outputs =
-      case Enum.any?(block.transaction.outputs, fn {a, _v} -> Map.has_key?(utxos, a) end) do  # if address output is already in UTXO
-      true -> Enum.map(block.transaction.outputs, fn {a, v} -> {a, v + Map.get(utxos, a, 0)} end) # sum up the values
-      false -> block.transaction.outputs
-    end
-
-    input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end)
-    outputs = Map.new(outputs, fn {a, v} -> {a, v} end)
-    utxos |> Map.drop(input_addresses) |> Map.merge(outputs)
+    input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end) # convert pub_keys to addresses
+    outputs = Map.new(block.transaction.outputs, fn {a, v} -> {a, v} end) # convert to map
+    utxos |> Map.drop(input_addresses) |> Map.merge(outputs, fn _k, v1, v2 -> v1 + v2 end) # update utxos
   end
 
   defp weighted_random(validators) do
@@ -294,7 +296,7 @@ defmodule BlockchainNode do
   defp proof_of_work(pid, block) do
     n = :rand.uniform(trunc(:math.pow(2, 32)))
     cond do
-      String.starts_with?(calculate_pow_hash(block, n), "000000") -> send(pid, {:pow_found, block, n})
+      String.starts_with?(calculate_pow_hash(block, n), String.duplicate("0", @pow_difficulty)) -> send(pid, {:pow_found, block, n})
       true -> proof_of_work(pid, block)
     end
   end
@@ -307,25 +309,26 @@ defmodule BlockchainNode do
   defp check_work(block) do
     nonce = block.nonce
     block = Map.drop(block, [:nonce, :miner, :next_validators])
-    calculate_pow_hash(block, nonce) |> String.starts_with?("000000")
+    calculate_pow_hash(block, nonce) |> String.starts_with?(String.duplicate("0", @pow_difficulty))
   end
 
   # ============================
   # ---- Verify transaction ----
   # ============================
   defp verify(state, tx) do
-    # turn pub keys into addresses
-    input_addresses = Enum.map(tx.inputs, fn pub_key -> derive_address(pub_key) end)
+    input_addresses = Enum.map(tx.inputs, fn pub_key -> derive_address(pub_key) end) # turn pub keys into addresses
+    not_creating_money = not_creating_money(state, input_addresses, tx.outputs)
     utxos_are_unspent = Enum.all?(input_addresses, fn address -> Map.has_key?(state.utxos, address) end)
 
-    if utxos_are_unspent do
-      sum_of_inputs = Enum.reduce(input_addresses, 0, fn address, acc -> acc + state.utxos[address] end)
-      sum_of_outputs = Enum.reduce(tx.outputs, 0, fn {_, amount}, acc -> acc + amount end)
+    utxos_are_unspent and not_creating_money and sigs_valid(tx)
+  end
 
-      sum_of_inputs >= sum_of_outputs and sigs_valid(tx)
-    else
-      false
-    end
+  # check whether the used sum of outputs is equal to the sum of used UTXO
+  defp not_creating_money(state, input_addrs, outputs) do
+    inputs_total = Enum.reduce(input_addrs, 0, fn addr, acc -> acc + Map.get(state.utxos, addr, 0) end)
+    outputs_total = Enum.reduce(outputs, 0, fn {_, amount}, acc -> acc + amount end)
+
+    inputs_total == outputs_total
   end
 
   # check if all signatures of a transaction are valid
