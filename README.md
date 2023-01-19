@@ -23,31 +23,32 @@ Refer to the README in the corresponding folder for more information.
 
 ### Implementation
 
-The repository contains two main components:
+The repository contains two components:
 
-1. A backend elixir application implementing a blockchain, as well as client wallet
-2. A frontend web application that allows you to interact with the blockchain
+1. A backend elixir application holding the logic for POCoin.
+2. A frontend web application to visualize the cryptocurrency in action.
 
-Blah blah
+For the backend, the following have been implemented:
 
-#### `wallet.ex`
+##### `wallet.ex`
 
-- The node is not Hierarchal Deterministic (HD) and manages keys separately
-- Has it's own mempool of transactions, which waits for change to be available before broadcasting transactions to the network
-- Can retry transactions ignored by node (such as when an transaction uses old UTXO)
-- Pools node to for new blocks in blockchain
+- Standard (not HD) crypto wallet managing keypairs.
+- Can wait for pending change to be available before sending a transaction to the network.
+- Retries transactions ignored by node (such as when an transaction uses old UTXO).
+- Generates cryptographically correct transaction payloads.
+- Pools nodes to update UTXOs and balance in near real-time.
 
-#### `node.ex`
+##### `node.ex`
 
-- Manages blockchain
-- Verifies transactions
-- Runs consensus
-- Manages mempool
-- Runs PoW
+- Basic Node, holds the replicated blockchain.
+- Verifies received transactions and broadcasts them to other nodes.
+- Keeps mempool of transactions.
+- Polls mempool to run PoW in order to create a block.
+- Runs consensus when a block is mined.
 
-#### `web-server.ex`
+##### `web-server.ex`
 
-Simplet
+Simple Cowboy webserver that exposes various endpoints from `wallet.ex` and `node.ex`.
 
 ## Service API
 
@@ -118,38 +119,34 @@ get_mining_power(node) # returns the percentage of blocks mined by a node
 ### Webserver endpoints
 
 ```php
-// Exposes various data for a wallet
-GET /wallet_stats?w=:wallet
+GET /wallet_stats?w=:wallet // Exposes various data for a wallet
 ```
 
 ```php
-// Send money amount from wallet to an address
-GET /send?w=:wallet&to_addr=:address&amount=:amount
+GET /send?w=:wallet&to_addr=:address&amount=:amount // Send money amount from wallet to an address
 ```
 
 ```php
-// Generate a new address for a wallet
-GET /generate_address?w=:wallet
+GET /generate_address?w=:wallet // Generate a new address for a wallet
 ```
 
 ```php
-// Exposes various data for a node
-GET /node_stats?n=:node
+GET /node_stats?n=:node // Exposes various data for a node
 ```
 
 ```php
-// Exposes the whole blockchain
-GET /blockchain?n=:node
+GET /blockchain?n=:node&height=:height // Get blockchain blocks above height
 ```
 
 ## About POCoin
 
-The POCCoin blockchain is a Bitcoin-inspired proof of concept blockchain. It uses a proof-of-work along Paxos consensus to reach block finality. 
+POCoin is a Bitcoin-inspired proof of concept cryptocurrency. It uses proof-of-work and Paxos consensus to reach instant block finality.
 
-Some simplifications have been made to the blockchain:
-  - Every block only contains a single transaction
-  - Nodes act as both miners and validators
-  - Not fully BFT resistant
+The proof-of-concept name derives from the simplifications that have been applied to the blockchain:
+
+- Every block only contains a single transaction
+- Nodes act as both miners and validators
+- Assumes a permissioned blockchain, as it is not fully Byzantine Fault Tolerant
 
 ### Tokenomics :rocket:
 
@@ -167,23 +164,17 @@ Since there are no block rewards and a fixed supply, the genesis block assigns 1
 
 Not everyone can participate in the consensus algorithm. The network uses a standard proof-of-work algorithm to select the next proposer and validators.
 
-
 #### Choosing the proposer
 
-The node keeps polling 
-Whichever node finds the POW first is selected as the next proposer.
-Nodes will reject any proposed block whose nonce is not valid. This is untrue sadly !!
-
-Difficulty of POW is fixed and requires nodes to find a hash of the block starting with 6 zeros.
+The difficulty of the PoW is fixed and requires nodes to find a hash of the block starting with 6 zeros. Whichever node finds the solution first can propose a block to the network. Proposed blocks without a valid nonce or referencing the wrong parent will be ignored.
 
 #### Choosing the validators
 
-To select validators, every node keep track of the percentage of blocks
-mined by other nodes (mining power).
-When a proposer finds a PoW solution, it chooses 3 validators through weighted random selection, where the weight is the mining power of the node.  
-This ensures that only nodes that are contributing to the network are selected as validators. Still susceptible to 51% attack.  
+Every node keeps track of the percentage of blocks mined by other nodes (mining power).
+When a node finds a PoW solution and becomes a proposer, it also chooses 2 validators through weighted random selection, where the weight is the mining power of the node.  
+This ensures that only nodes that are contributing to the network are selected as validators.
 
-To even the playing field, this rule is only applied above height 10 and the proposer is always selected as a validator.
+To even the playing field, this rule is only applied above height 10 and validators are instead randomly selected before then.
 
 ## Service assumptions
 
@@ -193,41 +184,60 @@ The network is not Byzantine resistant. For instance:
 
 - Paxos is used as the consensus algorithm.
 - BEB is used as the broadcast algorithm.
-- Validators selection has not been implemented. (even though the data is present in the blockchain)
+- Validators selection has not been implemented. (even though the data needed is present in the blockchain)
 
-The cryptography used in the blockchain however accounts for Byzantine behavior:
+The cryptography used in the blockchain however accounts for some Byzantine behavior:
 
 - You cannot double spend or create coins from thin air.
 - You can only spend your own coins.
 - You cannot modify other people's transactions.
 - You can only propose a block if you solve the PoW puzzle.
 
-### Paxos
-
-The nodes assume that a Paxos instance is equal to the block height. This can cause issues when a
-an instance is skipped or weh
-
-no adversary
-
-multiple instances is okay
-
-paxos round = block height
-
 ### Liveness
 
-How does it handle liveness when multiple people find a block at the same time?
+**1. A correct transaction sent to a node will always be added to the blockchain, given that at most a minority of blockchain nodes (running Paxos) can crash**
 
-- A transaction sent to a node will always be added to the blockchain, given that at most a minority of blockchain nodes (running Paxos) can crash
-- The PoW algorithm will always find a nonce solving the block
+- Our implementation of Paxos uses an increasing ballot when a node makes multiple proposals for the same instance. This ensures that the blockchain keeps making progress even if a node crashes.
 
+- Due to the PoW, it is very unlikely that multiple nodes will run consensus for the same instance at the same time. However, in the case that a node gets nacked, it will have to recalculate a PoW solution from scratch. The PoW acts as a back-off and will make it highly unlikely that a "collision" will happen again for the same instance.
+
+- Termination only holds if the PoW puzzle is sufficiently difficult to solve, as otherwise the back-off would not be long enough.
+
+**2. The PoW algorithm will eventually find a nonce solving the block**
+
+- Our implementation of PoW only requires nodes to find a nonce producing a hash starting with 6 zeros. This is not a very difficult task and will always terminate in a timely manner.
 
 ### Safety
 
-- You cannot double spend coins
-- Your available balance always equals the sum of the UTXOs that can be spent with your private keys
-- You cannot spend other people’s coins
-- can we have forks ???
+The following safety properties assume a permissioned setting (no bad actors).
 
+**1. All nodes agree on the same blockchain**
+
+- Forks are impossible due to running consensus for every block.
+- In a byzantine setting, nodes would _eventually_ agree, and a way to handle forks would have to be implemented.
+
+**2. You cannot double spend coins**
+
+- This property holds due to the nodes keeping track of the valid UTXOs and only allowing transactions that spend valid UTXOs. This is possible thanks to the blockchain, which keeps track of all past transactions and their outputs.
+
+- If assume bad actors are present (and replace Paxos with PBFT), this property would only hold if more than 2/3 of the processing power is held by honest nodes (as you need computing power to join consensus).
+
+**3. Only valid blocks can be added to the blockchain**
+
+- Blocks that have been mined for an old parents are rejected by other nodes.
+- Blocks need to have a valid nonce, as well as a valid transaction to be accepted.
+
+**4. Your available balance always equals the sum of the UTXOs that can be spent with your private keys**
+
+- Given the nodes have a record of how much money is in each UTXO, it is impossible to spend more than what you own.
+
+- _Also holds in a Byzantine setting._
+
+**5. You cannot spend other people’s coins**
+
+- Coins can only be spent by having knowledge of the private key associated with the UTXO. Transactions broadcasted to the network can not be modified by other nodes thanks to digital signatures.
+
+- _Also holds in a Byzantine setting._
 
 ## Usage Instructions
 
@@ -235,25 +245,34 @@ How does it handle liveness when multiple people find a block at the same time?
 
 On the left side of the screen, 5 different wallets are provided to visualize the wallet interface.
 
-- **Total Balance**: The total balance of the wallet, including pending balance
+The interface exposes underlying wallet data:
+
+- **Total Balance**: The total balance of the wallet (assumes all sent transactions will be confirmed in the blockchain)
 - **Available Balance**: The ready-to-spend balance of this wallet
-- **Available UTXOs**: The UTXOs that are ready to be spent
-- **Past Transactions**: The past transactions of the wallet (Transaction ID is truncated to 25 characters)
+- **Available UTXOs**: Owned addresses for a wallet. Expanding the the row will display public key that was used to generate the address as well as the private key that can be used to spend the coins
+- **Past Transactions**: All past transactions for this wallet
 
-You can also interact with the wallet by sending a transaction to an address. Try sending a transaction between 2 addresses using the form at the bottom and observe the nodes mining the new block and the transaction being added to the blockchain!
+You can also interact with the wallet API by sending a transaction to an address. Try sending a transaction between 2 addresses using the form at the bottom and observe the nodes mining the new block and the transaction being added to the blockchain!
 
-If a node decides to ignore your transaction, the wallet will silently retry it. For example if the UTXOs that were submitted for the transaction have changed since the transaction was sent.
+_Note that some data, such as keys and txid have either been truncated or base32 encoded before being displayed to the frontend_
 
 ### Blockchain
 
 In the center of the screen the blockchain can be observed. You can expand the blocks to see the transaction's information inside, or scroll all the way down to inspect the genesis block.
-(Transaction fields, apart from outputs, are truncated to 25 characters)
+
+Try and check if the information displayed is consistent with the data displayed in the wallets and nodes!
+
+_Note that some data has either been truncated or base32 encoded before being displayed to the frontend_
 
 ### Nodes
 
-The POCCoin network is composed of 5 nodes, which are represented on the right side of the screen. Each tab corresponds to a node and showcases its interface.
+The POCCoin network is composed of 5 nodes, which are represented on the right side of the screen.
 
-- **Mining Power**: The percentage of blocks that the node has mined. (Taken into consideration when selecting the next validators for a block)
-- **Proof of work**: The block on which the node is currently working.
-- **Mempool**: Transactions in the blockchain Mempool.
-- **Blockchain UTXOs**: All the UTXOs on the node's blockchain. (Must be consistent across nodes)
+The interface exposes underlying node data:
+
+- **Mining Power**: The percentage of blocks that the node has mined (used to decide validators)
+- **Proof of work**: The block on which the node is currently working
+- **Mempool**: Transactions in the blockchain Mempool
+- **Blockchain UTXOs**: Complete list of UTXOs in the blockchain
+
+Try and send 2 transactions at the same time to observe the mempool getting filled. Note that you might have to send from 2 different wallets if one has a single UTXO available to be spent.
