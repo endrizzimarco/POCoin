@@ -52,6 +52,10 @@ const transactionsTableCols = [
   }
 ]
 
+const expandedRowsChanged = expandedRows => {
+  if (expandedRows.length > 1) expandedRows.shift()
+}
+
 const getAddressPubPrivKeys = (addr, addresses) => {
   return addresses.find(x => Object.keys(x)[0] === addr)[addr]
 }
@@ -82,7 +86,8 @@ a-row.balance
     :columns='addressesTableCols',
     :data-source='state.available_utxos',
     size='small',
-    :pagination='{ hideOnSinglePage: true, pageSize: 3, size: "small" }'
+    :pagination='{ hideOnSinglePage: true, pageSize: 3, size: "small" }',
+    @expandedRowsChange='expandedRows => expandedRowsChanged(expandedRows)'
   )
     template(#bodyCell='{ column, record }')
       template(v-if='column.key === "balance"')
