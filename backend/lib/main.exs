@@ -1,8 +1,8 @@
-IEx.Helpers.c "components/best_effort_broadcast.ex", "."
-IEx.Helpers.c "components/paxos.ex", "."
-IEx.Helpers.c "components/wallet.ex", "."
-IEx.Helpers.c "components/node.ex", "."
-IEx.Helpers.c "components/master.ex", "."
+IEx.Helpers.c "lib/components/best_effort_broadcast.ex", "."
+IEx.Helpers.c "lib/components/paxos.ex", "."
+IEx.Helpers.c "lib/components/wallet.ex", "."
+IEx.Helpers.c "lib/components/node.ex", "."
+IEx.Helpers.c "lib/components/master.ex", "."
 
 {nodes_pids, wallet_pids} = Master.start()
 IO.puts("wallet_pids: #{inspect wallet_pids}")

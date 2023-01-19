@@ -1,26 +1,22 @@
-# WebServer
+# Backend
 
-**TODO: Add description**
+## Dependencies
 
-## Installation
-
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `web_server` to your list of dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:web_server, "~> 0.1.0"}
-  ]
-end
-```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/web_server>.
-
-## Dependencies 
 `mix deps.get`
 
-## Run 
+## Run backend
+
 `mix run --no-halt`
+
+## Run in interactive mode
+
+`iex lib/main.exs`
+
+## Run Paxos tests
+
+1. `epmd -daemon` to start the Erlang port mapper
+2. `iex paxos_tests/test_script.exs` to run the tests
+
+### Debugging
+
+If the multi-node tests fail with the `"Can not start :erlang::apply..."` warnings, start the Erlang port mapper from the command line as follows: `epmd -daemon`.
