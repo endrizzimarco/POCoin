@@ -17,7 +17,7 @@ export const useNodeStore = defineStore('nodesStore', () => {
   const node = ref({ n1: state, n2: state, n3: state, n4: state, n5: state })
 
   const getNodeStats = async n => {
-    const responses = await axios.get(`http://localhost:3000/node_stats?node=${n}`)
+    const responses = await axios.get(`http://${location.hostname}:3000/node_stats?node=${n}`)
     node.value[n] = responses.data
   }
 

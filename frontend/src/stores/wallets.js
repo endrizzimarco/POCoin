@@ -37,7 +37,7 @@ export const useWalletStore = defineStore('walletStore', () => {
   })
 
   const getWalletStats = async w => {
-    const r = await axios.get(`http://localhost:3000/wallet_stats?wallet=${w}`)
+    const r = await axios.get(`http://${location.hostname}:3000/wallet_stats?wallet=${w}`)
     wallet.value[w] = r.data
   }
 
