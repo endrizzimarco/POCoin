@@ -28,8 +28,9 @@ export const useWalletStore = defineStore('walletStore', () => {
     ]
     return wallets.map(obj => {
       return {
+        value: obj.w,
         label: obj.name,
-        options: wallet.value[obj.w].addresses.map(obj => {
+        children: wallet.value[obj.w].addresses.map(obj => {
           return { value: Object.keys(obj)[0], label: Object.keys(obj)[0] }
         })
       }

@@ -16,7 +16,7 @@ const sendCoins = async () => {
   const r = await axios.get(`http://${location.hostname}:3000/send`, {
     params: {
       wallet: props.w,
-      to_addr: formState.addr,
+      to_addr: formState.addr.at(-1),
       amount: formState.amount
     }
   })
@@ -24,7 +24,6 @@ const sendCoins = async () => {
   r.status === 200 ? (data.includes('rejected') ? message.error(data) : message.success(data)) : message.error(data)
   formState.addr = null
   formState.amount = null
-  store.getWalletStats()
 }
 </script>
 
@@ -41,7 +40,7 @@ a-form(layout='inline', :model='formState', @finish='sendCoins')
       :disabled='available_balance <= 0'
     )
   a-form-item(name='addr', :rules='[{ required: true, message: "Please input an address" }]')
-    a-select(
+    a-cascader(
       v-model:value='formState.addr',
       :options='store.addresses',
       placeholder='Address',
