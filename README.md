@@ -119,11 +119,11 @@ get_mining_power(node) # returns the percentage of blocks mined by a node
 ### Webserver endpoints
 
 ```php
-GET /wallet_stats?w=:wallet // Exposes various data for a wallet
+GET /wallet_stats?w=:wallet // Exposes internal data of a wallet
 ```
 
 ```php
-GET /send?w=:wallet&to_addr=:address&amount=:amount // Send money amount from wallet to an address
+GET /send?w=:wallet&to_addr=:address&amount=:amount // Send amount from wallet to an address
 ```
 
 ```php
@@ -131,7 +131,7 @@ GET /generate_address?w=:wallet // Generate a new address for a wallet
 ```
 
 ```php
-GET /node_stats?n=:node // Exposes various data for a node
+GET /node_stats?n=:node // Exposes internal data of a node
 ```
 
 ```php
