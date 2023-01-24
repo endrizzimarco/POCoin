@@ -79,7 +79,7 @@ defmodule BlockchainNode do
           {:timeout} ->
             IO.puts("timeout")
             start_pow(state, block.transaction.txid, block.transaction)
-          {:decided, _} ->
+          {:decision, _} ->
             IO.puts("#{inspect state.name} successfully mined block #{height(state.blockchain)}")
             beb_broadcast({:block_decided}, state.nodes)
         end

@@ -15,21 +15,25 @@ defmodule Paxos do
       name: name,
       processes: participants,
       quorum: div(length(participants), 2) + 1,
-      nacked: %{}, # store nacked ballots for an instance %{inst => {prevBal}}
       decided: %{}, # log of decided values %{inst => value}
+
+      # ==========================
+      # ----- Instance state -----
+      # ==========================
 
       # == acceptor state ==
       # a ballot is defined in the form {inst, counter, proc_name} to ensure uniqueness and increasing order
       # the counter is incremented each time a new proposal is made by the same proposer for the same instance
-      bal: %{}, # highest ballot in which this process participated %{inst => {inst, counter, pid}}
-      a_bal: %{}, # highest ballot that was ever accepted by this process %{inst => {inst, counter, pid}}
+      bal: %{}, # highest ballot in which this process participated %{inst => {inst, counter, p_name}}
+      a_bal: %{}, # highest ballot that was ever accepted by this process %{inst => {inst, counter, p_name}}
       a_val: %{}, # value associated with highest accepted ballot a_bal %{inst => value}
 
       # == proposer state ==
       proposed_value: %{}, # value proposed for a round:  %{inst => value}
       prepared: %{}, # received prepared messages for a round:  %{inst => [{bal, a_bal, a_val}]}
       accepted: %{}, # received accepted messages for a round:  %{inst => count}
-      client: %{}, # client that initiated the round:  %{{inst, pid} => client}
+      nacked: %{}, # nacked ballots for a round:  %{inst => MapSet(b)}
+      client: %{}, # client that initiated the round:  %{b => client}
     }
 
     run(state)
@@ -72,36 +76,32 @@ defmodule Paxos do
         end
 
       {:decided, inst, v} ->
-        # update decided value for this round and delete intermidiary data
-        if not already_decided(state, inst) do
-          beb_broadcast({:decided, inst, v}, state.processes) # rb: ensure everyone knows even when proposer fails
-          %{state | decided: Map.put(state.decided, inst, v),
-                    bal: Map.delete(state.bal, inst),
-                    a_bal: Map.delete(state.a_bal, inst),
-                    a_val: Map.delete(state.a_val, inst)}
-        else
-          state # ignore - already saved
+        case already_decided(state, inst) do
+          true -> state # ignore - already saved
+          false ->
+            beb_broadcast({:decided, inst, v}, state.processes) # rb: ensure everyone knows even when proposer fails
+            state = cleanup_acceptor_state(state, inst)
+
+            %{state | decided: Map.put(state.decided, inst, v)}
         end
 
       # ====================
       # ----- Proposer -----
       # ====================
       {:propose, client, inst, value} ->
-        # IO.puts("#{inspect state.name}: received propose request for instance #{inspect inst} with value #{inspect value}")
-
-        # if trying to propose for a decided instance - abort
-        if already_decided(state, inst) do
-            send(client, {:abort, inst})
+        case already_decided(state, inst) do
+          true ->
+            send(client, {:decided, state.decided[inst]})
             state
-        else
-          counter = Map.update(state.nacked, inst, 0, fn counter -> counter + 1 end)
-          b = {inst, counter, state.name}
 
-          # brodcast prepare message to all acceptors
-          beb_broadcast({:prepare, self(), b}, state.processes)
-          %{state | proposed_value: Map.put(state.proposed_value, inst, value),
-                    nacked: counter,
-                    client: Map.put(state.client, b, client)}
+          false ->
+            # IO.puts("#{inspect state.name}: received propose request for instance #{inspect inst} with value #{inspect value}")
+            counter = if Map.has_key?(state.nacked, inst), do: MapSet.size(state.nacked[inst]), else: 0
+            b = {inst, counter, state.name}
+            beb_broadcast({:prepare, self(), b}, state.processes) # braodcast prepare message to all acceptors
+
+            %{state | proposed_value: Map.put(state.proposed_value, inst, value),
+                      client: Map.put(state.client, b, client)}
         end
 
       {:prepared, b, a_bal, a_val} ->
@@ -111,10 +111,12 @@ defmodule Paxos do
         state = %{state | prepared: Map.update(state.prepared, i, [{a_bal, a_val}], fn list -> [{a_bal, a_val} | list] end)}
 
         # if quorum of prepared messages, enter accept phase by broadcasting :accept messages
-        if length(state.prepared[i]) == state.quorum do
+        quorum_reached = length(state.prepared[i]) == state.quorum
+        if quorum_reached and not nacked_ballot(state, b) do
           # IO.puts("#{inspect state.name}: received quorum of prepared messages for instance #{inspect i}")
           v = decide_proposal(i, state)
           beb_broadcast({:accept, self(), b, v}, state.processes)
+
           %{state | prepared: Map.delete(state.prepared, i),
                     proposed_value: Map.delete(state.proposed_value, i)} # cleanup
         else
@@ -128,13 +130,14 @@ defmodule Paxos do
         state = %{state | accepted: Map.update(state.accepted, i, 1, fn x -> x + 1 end)}
 
         # if quorum of prepared messages, commit value with paxos processes and communicate back to client
-        if state.accepted[i] == state.quorum do
+        quorum_reached = state.accepted[i] == state.quorum
+        if quorum_reached and not nacked_ballot(state, b) do
           # IO.puts("#{inspect state.name}: decided value #{inspect v} for instance #{inspect i}")
           beb_broadcast({:decided, i, v}, state.processes)
           send(state.client[b], {:decided, v})
-          %{state | accepted: Map.delete(state.accepted, i),
-                    client: Map.delete(state.client, b),
-                    nacked: Map.delete(state.nacked, i)} # cleanup
+          state = cleanup_proposer_state(state, b)
+
+          %{state | nacked: Map.delete(state.nacked, i)} # cleanup previous nacked ballots for this round
         else
           state
         end
@@ -142,11 +145,13 @@ defmodule Paxos do
       {:nack, b} ->
         if Map.has_key?(state.client, b) do
           send(state.client[b], {:abort}) # ensure safety by aborting if a nack is received
-          %{state | client: Map.delete(state.client, b),
-                    nacked: Map.put(state.nacked, inst(b), elem(b, 1))}
+          state = cleanup_proposer_state(state, b)
+
+          %{state | nacked: Map.update(state.nacked, inst(b), MapSet.new([b]), fn mapset -> MapSet.put(mapset, b) end)}
         else
-          state
+          state # in case a slow acceptor sends a nack after the proposer has already decided, ignore
         end
+
 
       # =====================
       # ----- Utilities -----
@@ -174,7 +179,7 @@ defmodule Paxos do
     # and proposes a value value for the instance of consensus associated with inst.
     send(pid, {:propose, self(), inst, value})
     receive do
-      {:decided, v} -> {:decided, v}
+      {:decided, v} -> {:decision, v}
       {:abort} -> {:abort}
     after
       t -> {:timeout}
@@ -210,6 +215,24 @@ defmodule Paxos do
 
   defp already_decided(state, inst) do
     Map.has_key?(state.decided, inst)
+  end
+
+  defp nacked_ballot(state, b) do
+    Map.has_key?(state.nacked, inst(b)) and MapSet.member?(state.nacked[inst(b)], b)
+  end
+
+  defp cleanup_proposer_state(state, b) do
+    i = inst(b)
+    %{state | proposed_value: Map.delete(state.proposed_value, i),
+              prepared: Map.delete(state.prepared, i),
+              accepted: Map.delete(state.accepted, i),
+              client: Map.delete(state.client, b)}
+  end
+
+  defp cleanup_acceptor_state(state, inst) do
+    %{state | bal: Map.delete(state.bal, inst),
+              a_bal: Map.delete(state.a_bal, inst),
+              a_val: Map.delete(state.a_val, inst)}
   end
 
   defp inst(instance) do
