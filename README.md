@@ -14,6 +14,8 @@ docker compose up
 - Frontend will be available at `localhost`
 - Backend at `localhost:3000`
 
+_Note: if you are using an M1+ Mac, the docker-compose will not work. You will have to locally build the images and spin up the containers separately._
+
 ## Development
 
 Refer to the README in the corresponding folder for more information.
