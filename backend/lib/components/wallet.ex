@@ -1,10 +1,3 @@
-# ==== wallet API ====
-#   send(w, address, amount) ~ send money to another wallet
-#   generate_address(w) ~ generate a new address for the wallet
-#   add_keypair(w, {pub, priv}) ~ add a keypair to the wallet
-#   balance(w) ~ get wallet balance
-#   history(w) ~ get the history of every transaction
-
 defmodule Wallet do
   def start(name, node) do
     pid = spawn(Wallet, :init, [node])
@@ -233,7 +226,7 @@ defmodule Wallet do
   # =====================
   # ------ Pollers ------
   # =====================
-  """
+  @docp """
   polls a node to check whether a submitted transaction has been ignored
 
   Needed for the following case:
@@ -308,9 +301,9 @@ defmodule Wallet do
     end
   end
 
-  # ======================
-  # ----- Public API -----
-  # ======================
+    # ======================
+    # ----- Public API -----
+    # ======================
     # send amount from a wallet to an address
     def send(w, address, amount) do
       if amount < 0, do: raise("can't send negative money")
@@ -394,7 +387,7 @@ defmodule Wallet do
       end
     end
 
-    # returns the pending transaction for this wallet
+    # returns the next pending transaction for this wallet
     def get_pending_tx(w) do
       send(w, {:get_pending_tx, self()})
       receive do

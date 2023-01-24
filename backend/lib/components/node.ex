@@ -1,23 +1,3 @@
-# == Gossip ==
-# Once a transaction is received broadcast it to the network.
-
-# == Verify ==
-# When a transaction is received, check:
-# 1. The sum of the inputs is equal to the sum of outputs.
-# 2. UTXOs are not spent
-# 3. Digital sigatures are correct
-# If any of these fail, the transaction is invalid, otherwise add to mempool.
-
-# == Proof of Work ==
-# Start POW for the first transaction polled from the mempool.
-
-# == Paxos ==
-# Any node that solves the POW can start a round of Paxos. Get everyone to agree on the blockchain.
-
-# == New block added ==
-# Iterate through the transaction inputs and mark the corresponding UTXOs as spent.
-# Add the new transaction outputs to the UTXO set.
-
 defmodule BlockchainNode do
   @total_supply 1000
   @pow_difficulty 6
@@ -41,7 +21,6 @@ defmodule BlockchainNode do
       nodes: nodes,
       pax_pid: paxos_pid,
       # == blockchain state ==
-      height: 1, # height of the blockchain and paxos instance
       blockchain: [%{height: 1, timestamp: 0, miner: nil, nonce: nil, prev_hash: nil, transaction: genesis_transaction}],
       mempool: [], # transactions that have been received but not yet added to the blockchain [{txid, tx}]
       utxos: Map.put(%{}, derive_address(gen_pub_key), @total_supply), # %{address => value}
@@ -81,7 +60,7 @@ defmodule BlockchainNode do
         possible_validators = Map.delete(state.mining_power, state.name)
 
         validators =
-          if state.height < 10 do
+          if height(state.blockchain) < 10 do
             Map.keys(possible_validators) |> Enum.take_random(2)
           else
             # given a map of counts of blocks mined by each node, get percentage of blocks mined by each node
@@ -93,11 +72,15 @@ defmodule BlockchainNode do
         block = Map.put(block, :next_validators, validators ++ [state.name])
 
         # start SMR
-        case Paxos.propose(state.pax_pid, state.height+1, block, 1000) do
-          {:abort} -> IO.puts("another block is being proposed or has already been decdied")
-          {:timeout} -> IO.puts("timeout")
+        case Paxos.propose(state.pax_pid, height(state.blockchain), block, 1000) do
+          {:abort} ->
+            IO.puts("another block is being proposed or has already been decided")
+            start_pow(state, block.transaction.txid, block.transaction) # need to start POW again to ensure liveness
+          {:timeout} ->
+            IO.puts("timeout")
+            start_pow(state, block.transaction.txid, block.transaction)
           {:decided, _} ->
-            IO.puts("#{inspect state.name} successfully mined block #{inspect state.height+1}")
+            IO.puts("#{inspect state.name} successfully mined block #{height(state.blockchain)}")
             beb_broadcast({:block_decided}, state.nodes)
         end
         state
@@ -126,7 +109,7 @@ defmodule BlockchainNode do
 
       {:get_working_on, client} ->
         {tx, _} = state.working_on
-        send(client, {:working_on, [tx, state.height+1]})
+        send(client, {:working_on, [tx, height(state.blockchain)]})
         state
 
       {:get_mining_power, client} ->
@@ -142,6 +125,80 @@ defmodule BlockchainNode do
     run(state)
   end
 
+  # ==========================
+  # ---- General helpers  ----
+  # ==========================
+  # check for new blocks and process them
+  defp poll_for_blocks(state) do
+    case Paxos.get_decision(state.pax_pid, height(state.blockchain), 1000) do
+      nil -> state
+      {:timeout} -> state
+      block ->
+        state =
+          if verify_work(block) and block.prev_hash == latest_block_hash(state) do
+            # kill POW for this block height
+            if not is_nil(state.pow_pid) do
+              Task.shutdown(state.pow_pid, :brutal_kill)
+            end
+
+            state =
+              # check whether block mined is different from the block this node has been mining
+              case { block.transaction.txid, Map.delete(block.transaction, :txid) } == state.working_on do
+                true -> state
+                false -> %{state | mempool: [state.working_on] ++ state.mempool} # re-add block tx to mempool
+              end
+
+            %{state |
+                blockchain: state.blockchain ++ [block],
+                pow_pid: nil,
+                working_on: {nil, nil},
+                utxos: update_UTXO(state.utxos, block),
+                mining_power: Map.update(state.mining_power, block.miner, 1, fn blocks_mined -> blocks_mined + 1 end)}
+          else
+            state
+          end
+        poll_for_blocks(state)
+    end
+  end
+
+  defp height(blockchain) do
+    length(blockchain) + 1
+  end
+
+  # generate a block from a given transaction
+  defp generate_block(state, txid, transaction) do
+    %{
+      height: height(state.blockchain),
+      timestamp: System.os_time(),
+      transaction: Map.put(transaction, :txid, txid),
+      prev_hash: latest_block_hash(state)
+    }
+  end
+
+  defp latest_block_hash(state) do
+    bin = state.blockchain |> List.last() |> :erlang.term_to_binary()
+    :crypto.hash(:sha256, bin) |> Base.encode32()
+  end
+
+  # update UTXOs for a given block
+  defp update_UTXO(utxos, block) do
+    input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end) # convert pub_keys to addresses
+    outputs = Map.new(block.transaction.outputs, fn {a, v} -> {a, v} end) # convert to map
+    utxos |> Map.drop(input_addresses) |> Map.merge(outputs, fn _k, v1, v2 -> v1 + v2 end) # update utxos
+  end
+
+  # generate next validators randomly based on their mining power
+  defp weighted_random(validators) do
+    total = Enum.reduce(validators, 0, fn {_, v}, acc ->  v + acc end)
+    weighted = Enum.into(validators, %{}, fn {k, v} -> {k, v/total} end)
+    Enum.reduce_while(weighted, :rand.uniform(), fn ({k, v}, remaining) ->
+      if remaining - v <= 0, do: {:halt, k}, else: {:cont, remaining - v}
+    end)
+  end
+
+  # ====================
+  # ----- Mempool  -----
+  # ====================
   defp in_mempool(mempool, txid) do
     Enum.any?(mempool, fn {id, _tx} -> id == txid end)
   end
@@ -154,162 +211,41 @@ defmodule BlockchainNode do
       input_addresses = Enum.map(tx.inputs, fn pub_key -> derive_address(pub_key) end)
 
       case not_creating_money(state, input_addresses, tx.outputs) do
-        true -> # start POW for this block
-          block = generate_block(state, txid, tx)
-          pid = self()
-          pow_pid = Task.async(fn -> proof_of_work(pid, block) end)
-          %{state | pow_pid: pow_pid, working_on: {txid, tx}}
-
-        false -> # skip this transaction
-          poll_mempool(state)
+        true -> start_pow(state, txid, tx)
+        false -> poll_mempool(state) # skip this transaction
       end
     else
       state
     end
   end
 
-  # =========================
-  # ------ Public API  ------
-  # =========================
-  def get_new_blocks(node, height) do
-    send(node, {:get_new_blocks, self(), height})
-    receive do
-      {:new_blocks, [h | t]}  -> [h | t]
-      {:new_blocks, []} -> :up_to_date
-    after
-      1000 -> :timeout
-    end
-  end
-
-  def get_blockchain(node) do
-    send(node, {:get_blockchain, self()})
-    receive do
-      {:blockchain, blockchain} -> blockchain
-    after
-      1000 -> :timeout
-    end
-  end
-
-  def get_mempool(node) do
-    send(node, {:get_mempool, self()})
-    receive do
-      {:mempool, mempool} -> mempool
-    after
-      1000 -> :timeout
-    end
-  end
-
-    def get_utxos(node) do
-    send(node, {:get_utxos, self()})
-    receive do
-      {:utxos, utxos} -> utxos
-    after
-      1000 -> :timeout
-    end
-  end
-
-  def get_working_on(node) do
-    send(node, {:get_working_on, self()})
-    receive do
-      {:working_on, data} -> data
-    after
-      1000 -> :timeout
-    end
-  end
-
-  def get_mining_power(node) do
-    send(node, {:get_mining_power, self()})
-    receive do
-      {:mining_power, m_pow} -> m_pow
-    after
-      1000 -> :timeout
-    end
-  end
-
-  # ==========================
-  # ---- General helpers  ----
-  # ==========================
-  defp generate_block(state, txid, transaction) do
-    %{
-      height: state.height + 1,
-      timestamp: System.os_time(),
-      transaction: Map.put(transaction, :txid, txid),
-      prev_hash: latest_block_hash(state)
-    }
-  end
-
-  defp latest_block_hash(state) do
-    bin = state.blockchain |> List.last() |> :erlang.term_to_binary()
-    :crypto.hash(:sha256, bin) |> Base.encode32()
-  end
-
-  defp poll_for_blocks(state) do
-    case Paxos.get_decision(state.pax_pid, i = state.height + 1, 1000) do
-      nil -> state
-      {:timeout} -> state
-      block ->
-        state =
-          if check_work(block) and block.prev_hash == latest_block_hash(state) do
-            # kill POW for this block height
-            if not is_nil(state.pow_pid) do
-              Task.shutdown(state.pow_pid, :brutal_kill)
-            end
-
-            state =
-              # check whether block mined is different from the block this node has been mining
-              case { block.transaction.txid, Map.delete(block.transaction, :txid) } != state.working_on do
-                true -> %{state | mempool: [state.working_on] ++ state.mempool} # re-add failed block tx to mempool
-                false -> state
-              end
-
-            %{state |
-                blockchain: state.blockchain ++ [block],
-                pow_pid: nil,
-                working_on: {nil, nil},
-                height: state.height + 1,
-                utxos: update_UTXO(state.utxos, block),
-                mining_power: Map.update(state.mining_power, block.miner, 1, fn blocks_mined -> blocks_mined + 1 end)}
-          else
-            state
-          end
-        poll_for_blocks(%{state | height: i})
-    end
-  end
-
-  defp update_UTXO(utxos, block) do
-    input_addresses = Enum.map(block.transaction.inputs, fn pub_key -> derive_address(pub_key) end) # convert pub_keys to addresses
-    outputs = Map.new(block.transaction.outputs, fn {a, v} -> {a, v} end) # convert to map
-    utxos |> Map.drop(input_addresses) |> Map.merge(outputs, fn _k, v1, v2 -> v1 + v2 end) # update utxos
-  end
-
-  defp weighted_random(validators) do
-    total = Enum.reduce(validators, 0, fn {_, v}, acc ->  v + acc end)
-    weighted = Enum.into(validators, %{}, fn {k, v} -> {k, v/total} end)
-    Enum.reduce_while(weighted, :rand.uniform(), fn ({k, v}, remaining) ->
-      if remaining - v <= 0, do: {:halt, k}, else: {:cont, remaining - v}
-    end)
-  end
-
   # =======================
   # ---- Proof of Work ----
   # =======================
+  defp start_pow(state, txid, tx) do
+    block = generate_block(state, txid, tx)
+    pid = self()
+    pow_pid = Task.async(fn -> proof_of_work(pid, block) end)
+    %{state | pow_pid: pow_pid, working_on: {txid, tx}}
+  end
+
   defp proof_of_work(pid, block) do
     n = :rand.uniform(trunc(:math.pow(2, 32)))
     cond do
-      String.starts_with?(calculate_pow_hash(block, n), String.duplicate("0", @pow_difficulty)) -> send(pid, {:pow_found, block, n})
+      String.starts_with?(generate_pow_hash(block, n), String.duplicate("0", @pow_difficulty)) -> send(pid, {:pow_found, block, n})
       true -> proof_of_work(pid, block)
     end
   end
 
-  defp calculate_pow_hash(block, n) do
+  defp generate_pow_hash(block, n) do
     bin_sum = :erlang.term_to_binary(block) <> :erlang.term_to_binary(n)
     :crypto.hash(:sha256, bin_sum) |> Base.encode16()
   end
 
-  defp check_work(block) do
+  defp verify_work(block) do
     nonce = block.nonce
     block = Map.drop(block, [:nonce, :miner, :next_validators])
-    calculate_pow_hash(block, nonce) |> String.starts_with?(String.duplicate("0", @pow_difficulty))
+    generate_pow_hash(block, nonce) |> String.starts_with?(String.duplicate("0", @pow_difficulty))
   end
 
   # ============================
@@ -369,5 +305,69 @@ defmodule BlockchainNode do
 
   defp beb_broadcast(m, dest) do
     BestEffortBroadcast.beb_broadcast(Process.whereis(get_beb_name()), m, dest)
+  end
+
+  # =========================
+  # ------ Public API  ------
+  # =========================
+  # returns blocks in the blockchain above the input height
+  def get_new_blocks(node, height) do
+    send(node, {:get_new_blocks, self(), height})
+    receive do
+      {:new_blocks, [h | t]}  -> [h | t]
+      {:new_blocks, []} -> :up_to_date
+    after
+      1000 -> :timeout
+    end
+  end
+
+  # returns the whole blockchain
+  def get_blockchain(node) do
+    send(node, {:get_blockchain, self()})
+    receive do
+      {:blockchain, blockchain} -> blockchain
+    after
+      1000 -> :timeout
+    end
+  end
+
+  # returns transactions in the mempool
+  def get_mempool(node) do
+    send(node, {:get_mempool, self()})
+    receive do
+      {:mempool, mempool} -> mempool
+    after
+      1000 -> :timeout
+    end
+  end
+
+  # returns all UTXOs on the blockchain
+  def get_utxos(node) do
+    send(node, {:get_utxos, self()})
+    receive do
+      {:utxos, utxos} -> utxos
+    after
+      1000 -> :timeout
+    end
+  end
+
+  # returns the block that a node is currently mining
+  def get_working_on(node) do
+    send(node, {:get_working_on, self()})
+    receive do
+      {:working_on, data} -> data
+    after
+      1000 -> :timeout
+    end
+  end
+
+  # returns the percentage of blocks mined by a node
+  def get_mining_power(node) do
+    send(node, {:get_mining_power, self()})
+    receive do
+      {:mining_power, m_pow} -> m_pow
+    after
+      1000 -> :timeout
+    end
   end
 end

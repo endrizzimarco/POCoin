@@ -19,8 +19,10 @@ defmodule Paxos do
       decided: %{}, # log of decided values %{inst => value}
 
       # == acceptor state ==
-      bal: %{}, # highest ballot in which this process participated %{inst => {inst, pid}}
-      a_bal: %{}, # highest ballot that was ever accepted by this process %{inst => {inst, pid}}
+      # a ballot is defined in the form {inst, counter, proc_name} to ensure uniqueness and increasing order
+      # the counter is incremented each time a new proposal is made by the same proposer for the same instance
+      bal: %{}, # highest ballot in which this process participated %{inst => {inst, counter, pid}}
+      a_bal: %{}, # highest ballot that was ever accepted by this process %{inst => {inst, counter, pid}}
       a_val: %{}, # value associated with highest accepted ballot a_bal %{inst => value}
 
       # == proposer state ==
@@ -40,6 +42,7 @@ defmodule Paxos do
       # ====================
       {:prepare, proposer, b} ->
         {i, bal} = {inst(b), Map.get(state.bal, inst(b))}
+
         # If the ballot is greater than the currently highest seen ballot, send back a :prepared message
         if b > bal and not already_decided(state, i) do
           # IO.puts("#{inspect state.name}: promised ballot #{inspect b} for instance #{inspect i}")
@@ -54,6 +57,7 @@ defmodule Paxos do
 
       {:accept, proposer, b, v} ->
         {i, bal} = {inst(b), Map.get(state.bal, inst(b))}
+
         # If the ballot is greater than the current ballot, accept the ballot and send an :accepted message
         if b >= bal and not already_decided(state, i) do
           # IO.puts("#{inspect state.name}: accepted ballot #{inspect b} for instance #{inspect i} with value #{inspect v}")
@@ -85,28 +89,24 @@ defmodule Paxos do
       {:propose, client, inst, value} ->
         # IO.puts("#{inspect state.name}: received propose request for instance #{inspect inst} with value #{inspect value}")
 
-        cond do
-          # if already proposing for same ballot return abort message to client
-          already_decided(state, inst) ->
+        # if trying to propose for a decided instance - abort
+        if already_decided(state, inst) do
             send(client, {:abort, inst})
             state
+        else
+          counter = Map.update(state.nacked, inst, 0, fn counter -> counter + 1 end)
+          b = {inst, counter, state.name}
 
-          # no concurrent proposals for this instance
-          true ->
-          # b = {inst, counter, proc_name}
-          {b, state} = if Map.has_key?(state.nacked, inst) do
-              {{inst, state.nacked[inst]+1, state.name}, %{state | nacked: state.nacked[inst]+1}} # increasing ballot
-            else
-              {{inst, 0, state.name}, state} # first ballot for this instance
-            end
-            # brodcast prepare message to all acceptors
-            beb_broadcast({:prepare, self(), b}, state.processes)
-            %{state | proposed_value: Map.put(state.proposed_value, inst, value),
-                      client: Map.put(state.client, b, client)}
+          # brodcast prepare message to all acceptors
+          beb_broadcast({:prepare, self(), b}, state.processes)
+          %{state | proposed_value: Map.put(state.proposed_value, inst, value),
+                    nacked: counter,
+                    client: Map.put(state.client, b, client)}
         end
 
       {:prepared, b, a_bal, a_val} ->
         i = inst(b)
+
         # collect :prepared messages for an instance of paxos
         state = %{state | prepared: Map.update(state.prepared, i, [{a_bal, a_val}], fn list -> [{a_bal, a_val} | list] end)}
 
@@ -123,8 +123,10 @@ defmodule Paxos do
 
       {:accepted, b, v} ->
         i = inst(b)
+
         # increment accepted count for this ballot
         state = %{state | accepted: Map.update(state.accepted, i, 1, fn x -> x + 1 end)}
+
         # if quorum of prepared messages, commit value with paxos processes and communicate back to client
         if state.accepted[i] == state.quorum do
           # IO.puts("#{inspect state.name}: decided value #{inspect v} for instance #{inspect i}")
@@ -186,7 +188,7 @@ defmodule Paxos do
     send(pid, {:get_decision, self(), inst})
     receive do
       {:ok, v} when v != nil -> v
-      {:error, _m} -> nil
+      {:error, _m} -> nil # could return error message here
       true -> nil
     after
       t -> {:timeout}
@@ -214,7 +216,9 @@ defmodule Paxos do
     elem(instance, 0)
   end
 
-  # BEB Helper functions
+  # =======================
+  # ----- BEB helpers -----
+  # =======================
   defp get_beb_name() do
     {:registered_name, parent} = Process.info(self(), :registered_name)
     String.to_atom(Atom.to_string(parent) <> "_beb")
