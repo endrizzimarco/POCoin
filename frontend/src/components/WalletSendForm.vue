@@ -13,7 +13,7 @@ const formState = reactive({ amount: null, addr: null })
 const available_balance = computed(() => store.wallet[props.w].available_balance)
 
 const sendCoins = async () => {
-  const r = await axios.get(`http://${location.hostname}:3000/send`, {
+  const r = await axios.get(`https://${location.hostname}:2053/send`, {
     params: {
       wallet: props.w,
       to_addr: formState.addr.at(-1),

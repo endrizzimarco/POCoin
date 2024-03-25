@@ -1,6 +1,6 @@
 defmodule BlockchainNode do
   @total_supply 1000
-  @pow_difficulty 6
+  @pow_difficulty 5
 
   def start(name, node_names, paxos_names, gen_pub_key) do
     index = name |> to_string() |> String.last() |> String.to_integer()

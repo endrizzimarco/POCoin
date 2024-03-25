@@ -7,5 +7,5 @@ services:
   backend:
     image: endrizzimarco/com3026-backend
     ports:
-      - "3000:3000"
+      - "2053:2053"
     domainname: "pocoin"

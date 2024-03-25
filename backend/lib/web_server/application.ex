@@ -6,8 +6,8 @@ defmodule WebServer.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Start `WebServer` and listen on port 3000
-      {Plug.Cowboy, scheme: :http, plug: WebServer, options: [port: 3000]}
+      # Start `WebServer` and listen on port 2053
+      {Plug.Cowboy, scheme: :http, plug: WebServer, options: [port: 2053]}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
