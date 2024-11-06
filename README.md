@@ -1,7 +1,7 @@
 # POCoin - COM3026 Summative Coursework
 
 POCoin is a blockchain visualization tool that allows you to inspect how a cryptocurrency works.
-It is currently hosted at <http://ec2-176-34-174-172.eu-west-1.compute.amazonaws.com>.
+It is currently hosted at <https://pocoin.co.uk/>.
 
 _Note: the site is not responsive and was designed for a 14 inch screen at the minimum._
 
